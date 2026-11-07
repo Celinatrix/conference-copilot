@@ -125,7 +125,7 @@ describe('transcript export', () => {
   const seg = (over: Partial<SegmentDto>): SegmentDto => ({
     id: '1', conference_id: 'c', session_id: 's1', seq: 1, start_ms: 0, end_ms: 1000, speaker: 'Speaker 1', language: 'en',
     confidence: 0.9, text_original: 'Hello', text_vi: 'Xin chào', translation_status: 'done', translation_error: null,
-    is_important: false, edited: false, created_at: '', updated_at: '', ...over,
+    is_important: false, edited: false, flags: [], created_at: '', updated_at: '', ...over,
   });
 
   it('formats clock values', () => {

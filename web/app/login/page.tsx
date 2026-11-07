@@ -1,18 +1,45 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { api } from '@/lib/api';
 import { Logo } from '@/components/AppShell';
 import { Button, ErrorBanner, Field, inputClass } from '@/components/ui';
 
+interface InviteInfo {
+  workspace: string;
+  role: 'admin' | 'member';
+  email: string | null;
+  expires_at: string;
+}
+
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const inviteToken = useSearchParams().get('invite');
+  const [mode, setMode] = useState<'login' | 'register'>(inviteToken ? 'register' : 'login');
   const [form, setForm] = useState({ email: '', name: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invite, setInvite] = useState<InviteInfo | null>(null);
+
+  useEffect(() => {
+    if (!inviteToken) return;
+    api<InviteInfo>(`/api/invites/${encodeURIComponent(inviteToken)}`)
+      .then((info) => {
+        setInvite(info);
+        if (info.email) setForm((f) => ({ ...f, email: info.email! }));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Link mời không hợp lệ'));
+  }, [inviteToken]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -21,7 +48,7 @@ export default function LoginPage() {
     try {
       await api(`/api/auth/${mode}`, {
         method: 'POST',
-        json: mode === 'login' ? { email: form.email, password: form.password } : form,
+        json: mode === 'login' ? { email: form.email, password: form.password } : { ...form, ...(inviteToken ? { invite: inviteToken } : {}) },
       });
       router.replace('/');
     } catch (err) {
@@ -55,7 +82,7 @@ export default function LoginPage() {
           </div>
           <p className="mt-2 text-xs text-faint">Minh họa giao diện</p>
         </div>
-        <div className="text-xs text-faint">Dữ liệu hội nghị được mã hóa khi truyền và chỉ hiển thị với người được cấp quyền.</div>
+        <div className="text-xs text-faint">Dữ liệu hội nghị chỉ hiển thị với người được cấp quyền. Khi triển khai, hãy chạy sau HTTPS để dữ liệu được mã hóa khi truyền.</div>
       </section>
 
       <section className="flex items-center justify-center p-6">
@@ -64,9 +91,19 @@ export default function LoginPage() {
           <div>
             <h2 className="text-2xl font-semibold">{mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}</h2>
             <p className="mt-1 text-sm text-muted">
-              {mode === 'login' ? 'Chào mừng trở lại.' : 'Tài khoản đầu tiên sẽ là chủ sở hữu workspace.'}
+              {mode === 'login'
+                ? 'Chào mừng trở lại.'
+                : inviteToken
+                  ? 'Tạo tài khoản để tham gia workspace.'
+                  : 'Tài khoản đầu tiên trở thành chủ sở hữu. Sau đó chỉ đăng ký được bằng link mời.'}
             </p>
           </div>
+          {invite && mode === 'register' && (
+            <div className="rounded-xl border border-electric/30 bg-electric/10 px-4 py-3 text-sm">
+              Bạn được mời vào <b>{invite.workspace}</b> với vai trò <b>{invite.role === 'admin' ? 'Admin' : 'Thành viên'}</b>. Link hết hạn{' '}
+              {new Date(invite.expires_at).toLocaleDateString('vi-VN')}.
+            </div>
+          )}
           {error && <ErrorBanner message={error} />}
           {mode === 'register' && (
             <Field label="Họ tên">
@@ -74,7 +111,15 @@ export default function LoginPage() {
             </Field>
           )}
           <Field label="Email">
-            <input className={inputClass} type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} autoComplete="email" />
+            <input
+              className={inputClass}
+              type="email"
+              required
+              value={form.email}
+              readOnly={Boolean(invite?.email && mode === 'register')}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              autoComplete="email"
+            />
           </Field>
           <Field label="Mật khẩu" hint={mode === 'register' ? 'Ít nhất 10 ký tự.' : undefined}>
             <input

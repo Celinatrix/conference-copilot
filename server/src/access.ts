@@ -14,6 +14,8 @@ export interface ConferenceRow {
   glossary: string;
   visibility: 'private' | 'workspace';
   status: 'draft' | 'live' | 'paused' | 'ended';
+  /** Up to 3 suggested-answer styles, e.g. ["professional","concise","strategic"]. */
+  response_modes?: string[];
   created_at: string | Date;
   updated_at: string | Date;
 }

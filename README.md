@@ -28,8 +28,12 @@ npm run dev:server          # API + WebSocket on http://127.0.0.1:4000
 npm run dev:web             # UI on http://localhost:3000  (second terminal)
 ```
 
-Open http://localhost:3000 and create an account (the first account owns its workspace). Then create a
-conference, click **Start Listening**, choose an audio source and confirm the recording notice.
+Open http://localhost:3000 and create an account. The first account owns the workspace; after that, signup is
+closed and teammates join through invite links (Settings → Thành viên & lời mời; single use, expiring, member or
+admin). Then create a conference, click **Start Listening**, choose an audio source and confirm the recording notice.
+
+Both dev servers listen on `127.0.0.1` only, so nobody else on a shared Wi-Fi can reach them. Security probes:
+`npx tsx scripts/security-probe.ts` in `server/` (in-memory instance, no external calls).
 
 Tests: `npm test` (server unit + API/WebSocket integration tests against in-memory PGlite).
 Typecheck: `npm run typecheck`.

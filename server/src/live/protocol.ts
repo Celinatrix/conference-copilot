@@ -29,6 +29,8 @@ export interface SegmentDto {
   translation_error: string | null;
   is_important: boolean;
   edited: boolean;
+  /** Trust warnings: 'low_confidence', 'number:<digits>', 'term:<glossary term>'. */
+  flags: string[];
   created_at: string;
   updated_at: string;
 }
@@ -51,7 +53,9 @@ export type ServerEvent =
   | { type: 'segment'; segment: SegmentDto }
   | { type: 'segment.updated'; segment: SegmentDto }
   | { type: 'translation.delta'; segmentId: string; delta: string }
-  | { type: 'translation.done'; segmentId: string; text_vi: string; latencyMs: number | null }
+  | { type: 'translation.done'; segmentId: string; text_vi: string; latencyMs: number | null; flags: string[] }
+  | { type: 'question'; question: import('../ai/service.js').QuestionDto }
+  | { type: 'answer.delta'; questionId: string; delta: string }
   | { type: 'translation.error'; segmentId: string; message: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'pong'; t: number };

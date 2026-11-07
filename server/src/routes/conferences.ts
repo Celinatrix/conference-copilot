@@ -1,11 +1,13 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../app.js';
-import { requireUser } from '../auth.js';
+import { AttemptLimiter, requireUser } from '../auth.js';
 import { audit, getConferenceAccess, primaryWorkspace, type ConferenceRow } from '../access.js';
 import { formatTranscript } from '../export.js';
 import { toSegmentDto } from '../live/room.js';
 import { conferenceUsage } from '../usage.js';
+import { RESPONSE_MODE_KEYS, type ResponseMode } from '../ai/responder.js';
+import { computeFlags } from '../ai/trust.js';
 
 const LANGUAGE = z.string().regex(/^(multi|[a-z]{2,3}(-[A-Za-z0-9]{2,8})?)$/, 'Mã ngôn ngữ không hợp lệ');
 
@@ -18,7 +20,14 @@ const ConferenceInput = z.object({
   glossary: z.string().max(5000).default(''),
   visibility: z.enum(['private', 'workspace']).default('private'),
 });
-const ConferencePatch = ConferenceInput.partial();
+const ConferencePatch = ConferenceInput.partial().extend({
+  response_modes: z
+    .array(z.enum(RESPONSE_MODE_KEYS as [ResponseMode, ...ResponseMode[]]))
+    .min(1, 'Chọn ít nhất 1 kiểu trả lời')
+    .max(3, 'Tối đa 3 kiểu trả lời')
+    .optional(),
+});
+const JSON_COLUMNS = new Set(['response_modes']);
 
 const SegmentPatch = z
   .object({
@@ -38,6 +47,7 @@ function publicConference(c: ConferenceRow, access?: { canManage: boolean; canDe
 
 export function conferenceRoutes(app: FastifyInstance, ctx: AppContext) {
   const { db } = ctx;
+  const retranslateLimiter = new AttemptLimiter(ctx.config.aiRateLimits.retranslatePerMinute, 60_000);
   app.addHook('preHandler', requireUser);
 
   app.get('/api/dashboard', async (req) => {
@@ -75,7 +85,7 @@ export function conferenceRoutes(app: FastifyInstance, ctx: AppContext) {
     return { conferences: rows };
   });
 
-  app.post('/api/conferences', async (req, reply) => {
+  app.post('/api/conferences', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = ConferenceInput.parse(req.body);
     const ws = await primaryWorkspace(db, req.user!.id);
     if (!ws) return reply.code(400).send({ error: 'no_workspace', message: 'Tài khoản chưa thuộc workspace nào.' });
@@ -107,10 +117,10 @@ export function conferenceRoutes(app: FastifyInstance, ctx: AppContext) {
     const patch = ConferencePatch.parse(req.body);
     const fields = Object.entries(patch).filter(([, v]) => v !== undefined);
     if (!fields.length) return { conference: publicConference(access.conference, access) };
-    const sets = fields.map(([k], i) => `${k} = $${i + 2}`).join(', ');
+    const sets = fields.map(([k], i) => `${k} = $${i + 2}${JSON_COLUMNS.has(k) ? '::jsonb' : ''}`).join(', ');
     const [row] = await db.query<ConferenceRow>(
       `UPDATE conferences SET ${sets}, updated_at = now() WHERE id = $1 RETURNING *`,
-      [id, ...fields.map(([, v]) => v)],
+      [id, ...fields.map(([k, v]) => (JSON_COLUMNS.has(k) ? JSON.stringify(v) : v))],
     );
     await audit(db, { workspaceId: row.workspace_id, userId: req.user!.id, action: 'conference.update', targetType: 'conference', targetId: id, meta: { fields: fields.map(([k]) => k) } });
     return { conference: publicConference(row, access) };
@@ -176,7 +186,19 @@ export function conferenceRoutes(app: FastifyInstance, ctx: AppContext) {
        WHERE id = $1 RETURNING *`,
       [id, patch.text_original ?? null, patch.text_vi ?? null, patch.is_important ?? null, textEdited],
     );
-    const segment = toSegmentDto(row);
+    let segment = toSegmentDto(row);
+    if (textEdited) {
+      // A human correction replaces the machine's doubt: drop low-confidence, re-check numbers and terms.
+      const flags = computeFlags({
+        original: segment.text_original,
+        vi: segment.translation_status === 'skipped' ? null : segment.text_vi,
+        confidence: null,
+        glossary: access.conference.glossary,
+        lowConfidenceThreshold: ctx.config.lowConfidenceThreshold,
+      });
+      const [flagged] = await db.query(`UPDATE segments SET flags = $2::jsonb WHERE id = $1 RETURNING *`, [id, JSON.stringify(flags)]);
+      segment = toSegmentDto(flagged);
+    }
     ctx.live.broadcast(seg.conference_id, { type: 'segment.updated', segment });
     if (textEdited) {
       await audit(db, { workspaceId: access.conference.workspace_id, userId: req.user!.id, action: 'segment.edit', targetType: 'segment', targetId: id });
@@ -192,6 +214,11 @@ export function conferenceRoutes(app: FastifyInstance, ctx: AppContext) {
     const access = await getConferenceAccess(db, row.conference_id, req.user!.id);
     if (!access) return notFound(reply);
     if (!access.canManage) return forbidden(reply);
+    if (!retranslateLimiter.allow(req.user!.id)) {
+      return reply.code(429).send({ error: 'rate_limited', message: 'Bạn dịch lại quá nhanh. Thử lại sau một phút.' });
+    }
+    const verdict = await ctx.questions.guard.check(access.conference.workspace_id, access.conference.id);
+    if (!verdict.ok) return reply.code(429).send({ error: verdict.code, message: verdict.message });
     const context = await db.query<{ text_original: string; text_vi: string | null }>(
       'SELECT text_original, text_vi FROM segments WHERE conference_id = $1 AND seq < $2 ORDER BY seq DESC LIMIT 3',
       [row.conference_id, row.seq],

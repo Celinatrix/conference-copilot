@@ -5,6 +5,9 @@ import { audit, type ConferenceRow } from '../access.js';
 import { recordUsage, tokenCost } from '../usage.js';
 import type { SttProvider, SttResult, SttStream } from './stt.js';
 import { SentenceAssembler, type AssembledSegment } from './assembler.js';
+import { AudioTimeline } from './timeline.js';
+import { computeFlags } from '../ai/trust.js';
+import type { QuestionService } from '../ai/service.js';
 import type { Translator } from './translator.js';
 import type { ClientMessage, RoomStatus, SegmentDto, ServerEvent } from './protocol.js';
 
@@ -24,7 +27,13 @@ export interface LiveClient {
 
 export function toSegmentDto(row: any): SegmentDto {
   const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
-  return { ...row, confidence: row.confidence === null ? null : Number(row.confidence), created_at: iso(row.created_at), updated_at: iso(row.updated_at) };
+  return {
+    ...row,
+    confidence: row.confidence === null ? null : Number(row.confidence),
+    flags: Array.isArray(row.flags) ? row.flags : [],
+    created_at: iso(row.created_at),
+    updated_at: iso(row.updated_at),
+  };
 }
 
 export interface LiveDeps {
@@ -32,6 +41,8 @@ export interface LiveDeps {
   config: AppConfig;
   stt: SttProvider;
   translator: Translator;
+  /** Question detection + suggested answers; absent in setups without it. */
+  questions?: QuestionService;
   log: { info(o: object, m?: string): void; warn(o: object, m?: string): void; error(o: object, m?: string): void };
 }
 
@@ -52,6 +63,7 @@ class LiveRoom {
   private translateQueue: { segment: SegmentDto; receivedAt: number }[] = [];
   private translationsInFlight = 0;
   private assembler: SentenceAssembler | null = null;
+  private timeline: AudioTimeline | null = null;
   /** Segment inserts run one after another so seq numbers and DB order always match. */
   private writeChain: Promise<void> = Promise.resolve();
   private hostGrace: NodeJS.Timeout | null = null;
@@ -108,6 +120,7 @@ class LiveRoom {
 
   handleAudio(client: LiveClient, chunk: Buffer) {
     if (client !== this.host || this.status !== 'live' || !this.stt) return;
+    this.timeline?.mark(chunk.length);
     this.stt.send(chunk);
   }
 
@@ -130,6 +143,9 @@ class LiveRoom {
     try {
       const [conf] = await db.query<ConferenceRow>('SELECT * FROM conferences WHERE id = $1', [this.conferenceId]);
       if (!conf) return this.error(client, 'not_found', 'Hội nghị không tồn tại.');
+      // A new session is new spending: refuse it past the hard caps. A running session is never cut off.
+      const verdict = await this.deps.questions?.guard.check(conf.workspace_id, conf.id);
+      if (verdict && !verdict.ok) return this.error(client, 'budget_exceeded', verdict.message);
       this.conference = conf;
       const [session] = await db.query<{ id: string; started_at: Date }>(
         `INSERT INTO live_sessions (conference_id, started_by, audio_source, stt_provider, consent_confirmed_at)
@@ -149,6 +165,7 @@ class LiveRoom {
       this.sttSecondsRecorded = 0;
       this.status = 'live';
       this.assembler = new SentenceAssembler((segment) => this.queueWrite(segment));
+      this.timeline = new AudioTimeline(this.session.startedAt.getTime());
       this.stt = this.deps.stt.open(
         { language: conf.input_language || 'multi' },
         {
@@ -312,7 +329,18 @@ class LiveRoom {
     const [row] = await this.deps.db.query(
       `INSERT INTO segments (conference_id, session_id, seq, start_ms, end_ms, speaker, language, confidence, text_original)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [this.conferenceId, sessionId, seq, Math.round(s.startSec * 1000), Math.round(s.endSec * 1000), s.speaker, language, s.confidence, s.text],
+      [
+        this.conferenceId,
+        sessionId,
+        seq,
+        // Session clock, not audio clock: silence gating and pauses make the two drift apart.
+        this.timeline ? this.timeline.toSessionMs(s.startSec) : Math.round(s.startSec * 1000),
+        this.timeline ? this.timeline.toSessionMs(s.endSec) : Math.round(s.endSec * 1000),
+        s.speaker,
+        language,
+        s.confidence,
+        s.text,
+      ],
     );
     const segment = toSegmentDto(row);
     // The live line now continues from whatever has not been released yet.
@@ -341,6 +369,8 @@ class LiveRoom {
         .translateSegment(segment, conference, context, receivedAt)
         .then((vi) => {
           entry.vi = vi;
+          // Fire-and-forget: question detection must never hold up the translation queue.
+          void this.deps.questions?.onSegmentTranslated(segment, vi, conference, context.map((c) => c.original));
         })
         .catch((err) => this.deps.log.error({ err, segmentId: segment.id }, 'translation pipeline failed'))
         .finally(() => {
@@ -386,6 +416,11 @@ export class LiveManager {
 
   constructor(private deps: LiveDeps) {}
 
+  /** Wired after construction because the question service broadcasts through this manager. */
+  attachQuestions(questions: QuestionService) {
+    this.deps.questions = questions;
+  }
+
   room(conferenceId: string): LiveRoom {
     let room = this.rooms.get(conferenceId);
     if (!room) {
@@ -424,9 +459,17 @@ export class LiveManager {
     const conferenceId = segment.conference_id;
 
     const finish = async (status: 'done' | 'skipped', text: string) => {
+      const flags = computeFlags({
+        original: segment.text_original,
+        vi: status === 'skipped' ? null : text,
+        confidence: segment.confidence,
+        glossary: conference.glossary,
+        lowConfidenceThreshold: config.lowConfidenceThreshold,
+      });
       const [row] = await db.query(
-        `UPDATE segments SET text_vi = $2, translation_status = $3, translation_error = NULL, updated_at = now() WHERE id = $1 RETURNING *`,
-        [segment.id, text, status],
+        `UPDATE segments SET text_vi = $2, translation_status = $3, translation_error = NULL, flags = $4::jsonb, updated_at = now()
+         WHERE id = $1 RETURNING *`,
+        [segment.id, text, status, JSON.stringify(flags)],
       );
       if (!row) return text;
       this.broadcast(conferenceId, {
@@ -434,6 +477,7 @@ export class LiveManager {
         segmentId: segment.id,
         text_vi: text,
         latencyMs: receivedAt === null ? null : Date.now() - receivedAt,
+        flags,
       });
       return text;
     };

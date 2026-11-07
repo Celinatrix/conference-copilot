@@ -6,6 +6,10 @@ import { migrate, openPglite, type Db } from '../src/db.js';
 import { buildApp } from '../src/app.js';
 import { Translator, type TranslationRequest } from '../src/live/translator.js';
 import type { SttHandlers, SttProvider, SttStream } from '../src/live/stt.js';
+import { QuestionDetector } from '../src/ai/questions.js';
+import { Responder } from '../src/ai/responder.js';
+import { makeDocx } from './fixtures.js';
+import { actAsBrowser } from './helpers.js';
 
 /** Test double: lets the test push recognition results as if they came from the provider. */
 class ScriptedStt implements SttProvider {
@@ -48,6 +52,59 @@ class EchoTranslator extends Translator {
   }
 }
 
+class FakeDetector extends QuestionDetector {
+  constructor() {
+    super(null, 'fake-detector');
+  }
+  override get configured() {
+    return true;
+  }
+  override async detect(input: { current: string; currentVi: string | null; previous: string[] }) {
+    return {
+      detection: { is_question: true, worth_answering: true, question: input.current, question_vi: `VI: ${input.current}`, keywords: ['IBNR'] },
+      inputTokens: 10,
+      outputTokens: 10,
+    };
+  }
+}
+
+/** Answers from whatever context it is given, citing the first chunk, at a fixed $0.30 per answer. */
+class FakeResponder extends Responder {
+  constructor() {
+    super(null, 'fake-responder');
+  }
+  override get configured() {
+    return true;
+  }
+  override async generate(input: Parameters<Responder['generate']>[0], onDelta: (t: string) => void) {
+    onDelta('[[ANALYSIS]]\n');
+    const first = input.chunks[0];
+    return {
+      answer: {
+        analysis_vi: 'Họ hỏi lý do.',
+        options: input.modes.map((mode) => ({
+          mode,
+          vi: 'Theo tài liệu…',
+          en: 'According to the documents…',
+          citations: first ? [{ chunk_id: first.id, document_id: first.document_id, filename: first.filename, locator: first.locator, quote: first.content.slice(0, 20) }] : [],
+        })),
+        missing: '',
+        follow_ups: [],
+      },
+      usage: { input: 100_000, output: 10_000, cacheRead: 0, cacheWrite: 0 },
+    };
+  }
+}
+
+function multipartFile(filename: string, content: Buffer) {
+  const boundary = `----cc${Math.random().toString(16).slice(2)}`;
+  const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+  return {
+    payload: Buffer.concat([head, content, Buffer.from(`\r\n--${boundary}--\r\n`)]),
+    headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+  };
+}
+
 const ORIGIN = 'http://localhost:3000';
 let db: Db;
 let app: FastifyInstance;
@@ -84,9 +141,12 @@ function nextEvent(ws: WebSocket, type: string, predicate: (e: any) => boolean =
 
 beforeAll(async () => {
   db = await openPglite(null);
-  const config = loadConfig({ allowedOrigins: [ORIGIN], port: 0 });
+  const defaults = loadConfig();
+  // Functional tests: open signup so each test user gets an isolated workspace (invite flow is in security.test.ts).
+  const config = loadConfig({ allowedOrigins: [ORIGIN], port: 0, allowSignup: true, registerPerHour: 1000, answers: { ...defaults.answers, autoBudgetUsd: 0.5 } });
   await migrate(db, config.migrationsDir);
-  ({ app } = await buildApp(db, config, { logger: false, stt, translator }));
+  ({ app } = await buildApp(db, config, { logger: false, stt, translator, detector: new FakeDetector(), responder: new FakeResponder() }));
+  actAsBrowser(app, ORIGIN);
   await app.listen({ port: 0, host: '127.0.0.1' });
   const addr = app.server.address() as { port: number };
   baseUrl = `127.0.0.1:${addr.port}`;
@@ -171,7 +231,11 @@ describe('conferences and live pipeline', () => {
 
     const segs = (await app.inject({ url: `/api/conferences/${id}/segments`, headers: { cookie } })).json().segments;
     expect(segs).toHaveLength(1);
-    expect(segs[0]).toMatchObject({ text_vi: 'VI: Hello everyone', translation_status: 'done', start_ms: 0, end_ms: 1200 });
+    expect(segs[0]).toMatchObject({ text_vi: 'VI: Hello everyone', translation_status: 'done' });
+    // Timestamps are on the session clock: offset by when the first audio arrived, duration preserved.
+    expect(segs[0].end_ms - segs[0].start_ms).toBe(1200);
+    expect(segs[0].start_ms).toBeGreaterThanOrEqual(0);
+    expect(segs[0].start_ms).toBeLessThan(3000);
 
     const conf = (await app.inject({ url: `/api/conferences/${id}`, headers: { cookie } })).json();
     expect(conf.conference.status).toBe('ended');
@@ -256,6 +320,59 @@ describe('conferences and live pipeline', () => {
     await app.inject({ method: 'PATCH', url: `/api/segments/${full.segments[2].id}`, headers: { cookie }, payload: { is_important: true } });
     const delta = (await app.inject({ url: `/api/conferences/${id}/segments?since=${encodeURIComponent(full.serverTime)}`, headers: { cookie } })).json();
     expect(delta.segments.map((s: { seq: number }) => s.seq)).toEqual([3]);
+  });
+
+  it('grounds auto-suggested answers in uploaded documents and switches to click-to-answer past the budget', async () => {
+    const cookie = await register('kb@example.com');
+    const id = (await app.inject({ method: 'POST', url: '/api/conferences', headers: { cookie }, payload: { name: 'Reserving forum' } })).json().conference.id;
+
+    const upload = multipartFile('notes.docx', await makeDocx(['IBNR tăng 8% do bão mùa hè.', 'Chain ladder dùng cho tam giác bồi thường.']));
+    const up = await app.inject({ method: 'POST', url: `/api/conferences/${id}/documents`, headers: { cookie, ...upload.headers }, payload: upload.payload });
+    expect(up.statusCode).toBe(201);
+    expect(up.json().document).toMatchObject({ filename: 'notes.docx', kind: 'docx', status: 'ready' });
+    const bad = multipartFile('photo.png', Buffer.from('x'));
+    expect((await app.inject({ method: 'POST', url: `/api/conferences/${id}/documents`, headers: { cookie, ...bad.headers }, payload: bad.payload })).statusCode).toBe(400);
+
+    const { ticket } = (await app.inject({ method: 'POST', url: `/api/conferences/${id}/ws-ticket`, headers: { cookie } })).json();
+    const ws = new WebSocket(`ws://${baseUrl}/ws?ticket=${ticket}`, { origin: ORIGIN });
+    await nextEvent(ws, 'state');
+    ws.send(JSON.stringify({ type: 'start', audioSource: 'microphone', consent: true }));
+    await nextEvent(ws, 'state', (e) => e.status === 'live');
+
+    const ask = (text: string, at: number) =>
+      stt.handlers!.onResult({ isFinal: true, speechFinal: true, text, language: 'en', speaker: 'Speaker 2', startSec: at, endSec: at + 2, confidence: 0.9 });
+
+    const answered1 = nextEvent(ws, 'question', (e) => e.question.status === 'answered');
+    ask('What drove the IBNR increase this year?', 0);
+    const q1 = (await answered1).question;
+    expect(q1).toMatchObject({ source: 'auto', text_vi: 'VI: What drove the IBNR increase this year?' });
+    expect(q1.answer.context).toBe('all');
+    expect(q1.answer.options.map((o: { mode: string }) => o.mode)).toEqual(['professional', 'concise', 'strategic']);
+    expect(q1.answer.options[0].citations[0]).toMatchObject({ filename: 'notes.docx', locator: 'phần 1' });
+
+    const answered2 = nextEvent(ws, 'question', (e) => e.question.status === 'answered');
+    ask('How do you validate the chain ladder results?', 3);
+    await answered2;
+
+    // $0.60 spent ≥ $0.50 budget: the next question waits for a click instead of spending more.
+    const waiting = nextEvent(ws, 'question', (e) => e.question.status === 'awaiting_click');
+    ask('Could you share the tail factor assumptions?', 6);
+    const q3 = (await waiting).question;
+
+    const manual = nextEvent(ws, 'question', (e) => e.question.id === q3.id && e.question.status === 'answered');
+    expect((await app.inject({ method: 'POST', url: `/api/questions/${q3.id}/answer`, headers: { cookie } })).statusCode).toBe(202);
+    await manual;
+
+    const list = (await app.inject({ url: `/api/conferences/${id}/questions`, headers: { cookie } })).json();
+    expect(list.questions).toHaveLength(3);
+    expect(list.spentUsd).toBeCloseTo(0.9, 5);
+
+    expect((await app.inject({ method: 'PATCH', url: `/api/conferences/${id}`, headers: { cookie }, payload: { response_modes: ['academic', 'technical'] } })).json().conference.response_modes).toEqual(['academic', 'technical']);
+    expect((await app.inject({ method: 'PATCH', url: `/api/conferences/${id}`, headers: { cookie }, payload: { response_modes: ['academic', 'technical', 'concise', 'strategic'] } })).statusCode).toBe(400);
+
+    ws.send(JSON.stringify({ type: 'stop' }));
+    await nextEvent(ws, 'state', (e) => e.status === 'idle');
+    ws.close();
   });
 
   it('refuses WebSocket connections without a valid ticket', async () => {

@@ -141,7 +141,7 @@ export default function LiveConferencePage() {
           break;
         case 'error':
           setNotice(e.message);
-          if (['stt_failed', 'stt_not_configured', 'host_busy', 'forbidden', 'start_failed'].includes(e.code)) stopCapture();
+          if (['stt_failed', 'stt_not_configured', 'host_busy', 'forbidden', 'start_failed', 'budget_exceeded'].includes(e.code)) stopCapture();
           break;
       }
     },

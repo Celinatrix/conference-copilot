@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type SystemStatus } from '@/lib/api';
 import { AudioCapture, captureSupport, describeMediaError, listInputDevices, requestMicPermission } from '@/lib/audio';
 import { Badge, Button, Card, ErrorBanner, Field, Spinner, inputClass } from '@/components/ui';
+import { MembersSection } from '@/components/MembersSection';
 
 export default function SettingsPage() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -31,6 +32,8 @@ export default function SettingsPage() {
           API key chỉ nằm trong file <code className="font-mono">.env</code> của server, không bao giờ được gửi xuống trình duyệt. Cơ sở dữ liệu: {status?.database ?? '…'}.
         </p>
       </section>
+
+      <MembersSection />
 
       <MicTest />
 
