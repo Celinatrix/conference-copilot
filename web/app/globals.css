@@ -1,0 +1,86 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink: #05080f;
+  --color-navy: #0a1020;
+  --color-panel: #0e1528;
+  --color-panel-2: #121b33;
+  --color-line: #1d2742;
+  --color-line-strong: #2a3658;
+  --color-fg: #e8ecf5;
+  --color-muted: #8b95b0;
+  --color-faint: #5d6886;
+  --color-electric: #3b6cff;
+  --color-electric-soft: #2a4fd1;
+  --color-cyan: #22d3ee;
+  --color-live: #ff4d6a;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-code), ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--color-ink);
+  color: var(--color-fg);
+}
+
+body {
+  background-image:
+    radial-gradient(1200px 600px at 85% -10%, rgb(59 108 255 / 0.12), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgb(34 211 238 / 0.07), transparent 60%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgb(59 108 255 / 0.45);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+.num-hl {
+  color: var(--color-cyan);
+  font-weight: 600;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(255 77 106 / 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgb(255 77 106 / 0);
+  }
+}
+.live-dot {
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+/* Off-screen transcript rows skip layout and paint; the placeholder height keeps scrolling stable. */
+.seg-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+
+@keyframes seg-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.seg-enter {
+  animation: seg-enter 0.35s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot,
+  .seg-enter {
+    animation: none;
+  }
+}
