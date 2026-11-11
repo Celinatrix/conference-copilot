@@ -1,0 +1,13 @@
+{
+  "name": "@conference-copilot/shared",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Types shared by backend and frontend: the live WebSocket protocol and API DTOs. Types only, no runtime code.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}

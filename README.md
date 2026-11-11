@@ -4,7 +4,7 @@ Trợ lý phiên dịch hội nghị theo thời gian thực: nghe diễn giả 
 dịch sang **tiếng Việt** sau khoảng 1–2 giây, lưu toàn bộ transcript, và cho cả nhóm 10–20 người cùng theo dõi một phiên.
 
 > **Trạng thái:** bản phát triển (chưa triển khai production). Lõi dịch realtime, quản lý hội nghị, lời mời thành viên
-> và các lớp bảo mật đã có, kèm 71 test tự động. Ứng dụng **chưa được chạy với API key thật** của Deepgram và Anthropic,
+> và các lớp bảo mật đã có, kèm 78 test tự động. Ứng dụng **chưa được chạy với API key thật** của Deepgram và Anthropic,
 > nên độ trễ và độ chính xác thực tế chưa được đo. Xem [Trạng thái tính năng](#trạng-thái-tính-năng) để biết chính xác
 > phần nào đã chạy, phần nào mới có backend.
 
@@ -43,13 +43,13 @@ dịch sang **tiếng Việt** sau khoảng 1–2 giây, lưu toàn bộ transcr
 | Dịch tiếng Việt streaming (Claude Haiku) | ⚠️ Chưa chạy với API thật | Có test với bản giả lập |
 | Ghép câu trước khi dịch, dịch song song 3 câu | ✅ Hoạt động (test) | Tránh câu dịch bị cắt vụn |
 | Transcript tự lưu, sửa, dịch lại, đánh dấu ★, tìm kiếm | ✅ Hoạt động | |
-| Cờ cảnh báo đoạn đáng ngờ (nghe không rõ, số liệu lệch, thuật ngữ sai) | ✅ Backend, ⚠️ chưa hiển thị trên giao diện | |
+| Cờ cảnh báo đoạn đáng ngờ (nghe không rõ, số liệu lệch, thuật ngữ sai) | ✅ Hoạt động | Hiện ngay dưới câu dịch; glossary dạng `thuật ngữ = cách dịch` |
 | Xuất Markdown / TXT | ✅ Hoạt động | PDF / DOCX chưa có |
 | Nhiều người cùng xem một phiên | ✅ Hoạt động | Đo được dưới 8 ms để đẩy tới 20 người (phần server) |
 | Tự kết nối lại khi rớt mạng, giữ 2 phút âm thanh | ✅ Có code, ⚠️ chưa thử rớt mạng thật | |
 | Chế độ chữ lớn, toàn màn hình, giữ màn hình sáng | ✅ Hoạt động | |
-| Knowledge Base: upload PDF, DOCX, PPTX, XLSX, CSV | ✅ Backend (API + test), ❌ chưa có giao diện upload | |
-| Phát hiện câu hỏi + gợi ý trả lời có trích dẫn tài liệu | ✅ Backend (API + test), ❌ chưa có giao diện | 3 kiểu trả lời, tiếng Việt + tiếng Anh |
+| Knowledge Base: upload PDF, DOCX, PPTX, XLSX, CSV | ✅ Hoạt động | Cột Công cụ của trang live; tối đa 25 MB mỗi file |
+| Phát hiện câu hỏi + gợi ý trả lời có trích dẫn tài liệu | ✅ Có giao diện, ⚠️ chưa chạy với API thật | Chọn 1–3 trong 5 kiểu trả lời ở Thông tin hội nghị; tiếng Việt + tiếng Anh |
 | Theo dõi chi phí, trần chi phí cứng | ✅ Hoạt động | |
 | Giọng đọc bản dịch, chặn im lặng (VAD), thanh điều khiển cho điện thoại | ❌ Chưa làm | Đã lên kế hoạch |
 | Báo cáo tổng hợp sau hội nghị | ❌ Chưa làm | |
@@ -116,16 +116,16 @@ npm install
 ### 2. Tạo file cấu hình
 
 ```bash
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
 Trên Windows PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item backend\.env.example backend\.env
 ```
 
-Mở `.env` và điền hai dòng sau. Đừng gửi nội dung file này cho ai, và đừng commit nó (`.gitignore` đã chặn sẵn).
+Mở `backend/.env` và điền hai dòng sau. Mọi API key chỉ nằm ở backend, frontend không bao giờ thấy key. Đừng gửi nội dung file này cho ai, và đừng commit nó (`.gitignore` đã chặn sẵn).
 
 ```ini
 DEEPGRAM_API_KEY=...
@@ -135,24 +135,24 @@ ANTHROPIC_API_KEY=...
 Chưa có key vẫn chạy được app: giao diện, đăng nhập, quản lý hội nghị đều dùng được. Phần thu âm và dịch sẽ báo
 "chưa cấu hình key" thay vì lỗi khó hiểu.
 
-### 3. Chạy server và giao diện (hai cửa sổ terminal)
+### 3. Chạy backend và frontend (hai cửa sổ terminal)
 
 ```bash
-npm run dev:server
+npm run dev:backend
 ```
 
 ```bash
-npm run dev:web
+npm run dev:frontend
 ```
 
-- **API và WebSocket:** `http://127.0.0.1:4000`. Lần chạy đầu tự tạo database và chạy migration.
-- **Giao diện:** http://localhost:3000
+- **Backend (API và WebSocket):** `http://127.0.0.1:4000`. Lần chạy đầu tự tạo database và chạy migration.
+- **Frontend (giao diện):** http://localhost:3001
 
 Cả hai server chỉ lắng nghe trên `127.0.0.1`, nên máy khác trong cùng Wi-Fi không truy cập được.
 
 ### 4. Tạo tài khoản Owner
 
-Mở http://localhost:3000 → **Đăng ký**. **Tài khoản đầu tiên** trở thành **Owner** của workspace. Sau đó đăng ký công
+Mở http://localhost:3001 → **Đăng ký**. **Tài khoản đầu tiên** trở thành **Owner** của workspace. Sau đó đăng ký công
 khai tự động đóng lại.
 
 ### 5. Mời thành viên
@@ -219,8 +219,11 @@ Kiểm tra micro trước buổi họp ở **Cài đặt → Kiểm tra micro**.
 
 ## Cấu hình (.env)
 
-File `.env` ở thư mục gốc do **server** đọc. Các biến của **giao diện** (cuối bảng) phải đặt trong `web/.env.local`,
-vì Next.js chỉ đọc file env trong thư mục `web/`.
+Cấu hình chia làm hai file:
+
+- `backend/.env`: do **backend** đọc, chứa mọi API key và cài đặt server (mẫu: `backend/.env.example`).
+- `frontend/.env.local`: tùy chọn, chỉ chứa hai biến của **frontend** ở cuối bảng (mẫu: `frontend/.env.example`).
+  Không đặt key vào đây: biến `NEXT_PUBLIC_*` bị gửi xuống trình duyệt.
 
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
@@ -239,18 +242,18 @@ vì Next.js chỉ đọc file env trong thư mục `web/`.
 | `AI_RETRANSLATE_PER_MINUTE` | `15` | Số lần dịch lại tối đa mỗi phút cho một người |
 | `LOW_CONFIDENCE_THRESHOLD` | `0.75` | Câu có độ tin cậy nhận dạng dưới mức này bị gắn cờ "nghe chưa rõ" |
 | `PORT` / `HOST` | `4000` / `127.0.0.1` | Địa chỉ server API |
-| `ALLOWED_ORIGINS` | `http://localhost:3000` | Origin trình duyệt được phép gọi API và mở WebSocket (phân cách bằng dấu phẩy) |
+| `ALLOWED_ORIGINS` | `http://localhost:3001,http://127.0.0.1:3001` | Origin trình duyệt được phép gọi API và mở WebSocket (phân cách bằng dấu phẩy) |
 | `COOKIE_SECURE` | `false` | Đặt `true` khi chạy sau HTTPS |
 | `TRUST_PROXY` | `loopback` | Proxy nào được tin header `X-Forwarded-For`. Không bao giờ đặt `true` |
 | `ALLOW_SIGNUP` | `false` | Bật đăng ký công khai. Chỉ dùng trong mạng kín tin cậy |
 | `REGISTER_PER_HOUR` | `5` | Số lần thử đăng ký tối đa mỗi giờ cho một IP |
 | `DATABASE_URL` | trống | Để trống thì dùng PGlite. Production: `postgres://user:pass@host:5432/copilot` |
-| `PGLITE_DIR` | `./data/pglite` | Thư mục dữ liệu PGlite |
+| `PGLITE_DIR` | `backend/data/pglite` | Thư mục dữ liệu PGlite |
 | `LOG_LEVEL` | `info` | Mức log của server |
-| `API_ORIGIN` *(web/.env.local)* | `http://127.0.0.1:4000` | Nơi Next.js chuyển tiếp `/api/*` |
-| `NEXT_PUBLIC_WS_URL` *(web/.env.local)* | `ws(s)://<host hiện tại>:4000` | Địa chỉ WebSocket mà trình duyệt kết nối |
+| `API_ORIGIN` *(frontend/.env.local)* | `http://127.0.0.1:4000` | Nơi Next.js chuyển tiếp `/api/*` |
+| `NEXT_PUBLIC_WS_URL` *(frontend/.env.local)* | `ws(s)://<host hiện tại>:4000` | Địa chỉ WebSocket mà trình duyệt kết nối |
 
-Sau khi sửa `.env`, khởi động lại `npm run dev:server`.
+Sau khi sửa `backend/.env`, khởi động lại `npm run dev:backend`.
 
 ---
 
@@ -318,28 +321,36 @@ Chạy 71 test của server: unit test và test tích hợp REST/WebSocket trên
 npm run typecheck
 ```
 
-Kiểm tra kiểu cho cả server và web.
+Kiểm tra kiểu cho cả backend và frontend, kể cả việc hai bên còn khớp hợp đồng chung trong `shared/`.
 
 ```bash
-npm run bench:fanout -w server
+npm run lint      # Biome; CI yêu cầu 0 lỗi
+npm run check     # lint + typecheck + test, chạy trước khi gửi thay đổi
+npm run format    # tùy chọn: định dạng lại code theo biome.json
+```
+
+CI (`.github/workflows/ci.yml`) chạy lint, typecheck, test và build cho mỗi pull request và mỗi lần push lên `main`.
+
+```bash
+npm run bench:fanout -w backend
 ```
 
 Đo độ trễ phân phối của server với 1/5/10/20 người xem, cùng thời gian tải và tìm kiếm cho một transcript 8 tiếng.
 Không gọi API ngoài.
 
 ```bash
-npm run bench:live -w server -- talk.wav --ref talk.txt --glossary terms.txt --language multi
+npm run bench:live -w backend -- talk.wav --ref talk.txt --glossary terms.txt --language multi
 ```
 
 Phát một file ghi âm qua **Deepgram và Claude thật**, theo đúng tốc độ thật. Kết quả gồm độ trễ (p50/p95), tỷ lệ lỗi từ
-(WER) và tỷ lệ nghe đúng thuật ngữ, kèm một bảng chấm điểm bản dịch lưu trong `data/bench/`. **Lệnh này tốn credit API**,
+(WER) và tỷ lệ nghe đúng thuật ngữ, kèm một bảng chấm điểm bản dịch lưu trong `backend/data/bench/`. **Lệnh này tốn credit API**,
 xấp xỉ độ dài file ghi âm. File phải là WAV 16 kHz mono; chuyển đổi trước bằng:
 
 ```bash
 ffmpeg -i talk.mp3 -ar 16000 -ac 1 -c:a pcm_s16le talk.wav
 ```
 
-Kiểm tra bảo mật (chạy trong thư mục `server/`):
+Kiểm tra bảo mật (chạy trong thư mục `backend/`):
 
 ```bash
 npx tsx scripts/security-probe.ts
@@ -354,14 +365,18 @@ Chạy 38 bài tấn công thử trên một bản app dựng trong bộ nhớ, 
 
 ```
 conference-copilot/
-├─ server/                      API + WebSocket (Fastify, TypeScript)
+├─ shared/                      HỢP ĐỒNG CHUNG: kiểu dữ liệu và giao thức WebSocket mà backend và frontend cùng import
+├─ backend/                     BACKEND: API + WebSocket (Fastify, TypeScript)
+│  ├─ .env.example              mẫu cấu hình + API key (chép thành .env)
+│  ├─ data/                     database PGlite (tự tạo, không commit)
 │  ├─ migrations/               SQL migration, tự chạy khi server khởi động
 │  ├─ scripts/                  bench-fanout, bench-live, security-probe
 │  ├─ src/
 │  │  ├─ app.ts                 dựng app: plugin, hook bảo mật, rate limit, route, WebSocket
-│  │  ├─ config.ts              đọc .env
+│  │  ├─ config.ts              đọc backend/.env
 │  │  ├─ db.ts                  PGlite / PostgreSQL + chạy migration
 │  │  ├─ auth.ts, access.ts     mật khẩu, phiên, vé WebSocket, quy tắc phân quyền, audit
+│  │  ├─ http.ts                tiện ích dùng chung cho route: kiểm tra UUID, định dạng thời gian, trả 404/403
 │  │  ├─ live/                  phiên realtime
 │  │  │  ├─ deepgram.ts         adapter Deepgram: kết nối lại, đệm, keep-alive
 │  │  │  ├─ assembler.ts        ghép các mẩu nhận dạng thành câu
@@ -370,11 +385,16 @@ conference-copilot/
 │  │  │  └─ room.ts             điều phối phiên, lưu, phát sự kiện, hàng chờ dịch
 │  │  ├─ kb/                    Knowledge Base: đọc tài liệu, kiểm tra an toàn, worker, tìm kiếm
 │  │  ├─ ai/                    phát hiện câu hỏi, soạn trả lời có trích dẫn, cờ cảnh báo, trần chi phí
+│  │  ├─ repos/                 SQL theo từng bảng: conferences, segments, workspace (route không viết SQL trực tiếp)
+│  │  ├─ services/              nghiệp vụ dùng chung giữa route: sửa transcript, dịch lại
 │  │  └─ routes/                REST: auth, conferences, documents, questions, workspace
 │  └─ test/                     vitest
-└─ web/                         giao diện (Next.js, React, Tailwind)
+└─ frontend/                    FRONTEND: giao diện (Next.js, React, Tailwind)
+   ├─ .env.example              mẫu cấu hình frontend (tùy chọn, chép thành .env.local)
    ├─ app/                      các trang: login, dashboard, hội nghị, live, cài đặt
-   ├─ components/               UI dùng chung, các dòng transcript, thành viên & lời mời
+   ├─ components/               UI dùng chung, thành viên & lời mời
+   │  └─ live/                  trang live: LiveHeader, columns (3 cột), rows, parts và các hook
+   │                            useTranscript, useLiveSession, useUsage
    ├─ lib/                      gọi API, thu âm, WebSocket client, giữ màn hình sáng
    └─ public/pcm-worklet.js     chuyển âm thanh sang 16 kHz PCM16 trên luồng audio
 ```
@@ -383,8 +403,9 @@ conference-copilot/
 
 ## API
 
-Tất cả nằm dưới `/api`, dữ liệu dạng JSON. Mọi route (trừ ghi chú khác) đều cần cookie phiên. Request thay đổi dữ liệu
-cần header `Origin` hợp lệ.
+Tất cả nằm dưới `/api/v1` (địa chỉ ổn định, có phiên bản) và `/api` (bí danh cho giao diện hiện tại), dữ liệu dạng JSON.
+Mọi route (trừ ghi chú khác) đều cần cookie phiên. Request thay đổi dữ liệu cần header `Origin` hợp lệ. Kiểu dữ liệu
+của request/response nằm trong `shared/src/index.ts`.
 
 | Method | Đường dẫn | Mô tả |
 | --- | --- | --- |
@@ -398,9 +419,9 @@ cần header `Origin` hợp lệ.
 | GET / POST | `/api/workspace/invites` | Xem / tạo lời mời (Owner, Admin) |
 | DELETE | `/api/workspace/invites/:id` | Thu hồi lời mời |
 | GET | `/api/dashboard` | Hội nghị gần đây, phiên đang chạy, số liệu tổng |
-| GET / POST | `/api/conferences` | Danh sách (`?q=`) / tạo hội nghị |
+| GET / POST | `/api/conferences` | Danh sách (`?q=`, phân trang `?limit=` tối đa 200 + `?offset=`, trả `nextOffset`) / tạo hội nghị |
 | GET / PATCH / DELETE | `/api/conferences/:id` | Chi tiết / sửa (kể cả `response_modes`) / xóa vĩnh viễn |
-| GET | `/api/conferences/:id/segments` | Transcript; lọc `?q=`, `?important=1`; đồng bộ bù `?since=` |
+| GET | `/api/conferences/:id/segments` | Transcript; lọc `?q=`, `?important=1`; đồng bộ bù `?since=`; phân trang theo `seq`: `?afterSeq=` + `?limit=` (mặc định 1000, tối đa 2000), lặp lại với `nextAfterSeq` đến khi là `null` |
 | PATCH | `/api/segments/:id` | Sửa bản gốc / bản dịch, đánh dấu quan trọng |
 | POST | `/api/segments/:id/retranslate` | Dịch lại một câu |
 | GET | `/api/conferences/:id/export` | Tải về: `format=md\|txt`, `view=both\|original\|vi` |
@@ -428,16 +449,18 @@ cần header `Origin` hợp lệ.
 | `002_segments_updated_idx.sql` | Index phục vụ đồng bộ bù khi kết nối lại |
 | `003_knowledge_and_questions.sql` | Tài liệu, đoạn tài liệu (full-text), câu hỏi; cột `flags`, `response_modes` |
 | `004_invitations.sql` | Lời mời thành viên |
+| `005_usage_workspace_time_idx.sql` | Index cho bước kiểm tra trần chi phí theo workspace trong 24 giờ |
+| `006_restrict_user_delete.sql` | Không cho xóa người dùng còn sở hữu hội nghị, tài liệu hoặc phiên nghe (trước đây xóa lan cả transcript) |
 
 Migration tự chạy khi server khởi động. Muốn chạy riêng:
 
 ```bash
-npm run migrate -w server
+npm run migrate -w backend
 ```
 
 Mọi migration đều chỉ **thêm** bảng hoặc cột, không xóa hay sửa dữ liệu cũ.
 
-**Sao lưu PGlite:** dừng server rồi sao chép cả thư mục `data/pglite`.
+**Sao lưu PGlite:** dừng server rồi sao chép cả thư mục `backend/data/pglite`.
 
 ---
 
@@ -446,19 +469,20 @@ Mọi migration đều chỉ **thêm** bảng hoặc cột, không xóa hay sử
 > Phần này **chưa được thử nghiệm**. Đây là danh sách việc cần làm, không phải quy trình đã kiểm chứng.
 
 1. Đặt server sau một reverse proxy **HTTPS** (Caddy, Nginx, Cloudflare Tunnel…) và chuyển tiếp cả WebSocket `/ws`.
-2. Cấu hình `.env`:
+2. Cấu hình `backend/.env`:
    - `COOKIE_SECURE=true`
    - `ALLOWED_ORIGINS=https://ten-mien-cua-ban`
    - `TRUST_PROXY=<địa chỉ proxy>`
    - `HOST` theo cấu hình mạng của máy chủ
-3. Cấu hình `web/.env.local`:
+3. Cấu hình `frontend/.env.local`:
    - `NEXT_PUBLIC_WS_URL=wss://ten-mien-cua-ban`
    - `API_ORIGIN=http://127.0.0.1:4000`
 4. Database: dùng **PostgreSQL 16+** qua `DATABASE_URL`, với một role chỉ có quyền trên database của app, kết nối TLS,
    và bật backup mã hóa.
 5. Build và chạy:
-   - Giao diện: `npm run build -w web`, rồi `npm run start -w web`.
-   - Server: `npm run start -w server`.
+   - `npm ci` rồi `npm run build`: backend được biên dịch ra `backend/dist/` (chạy bằng `node`, không cần `tsx`), frontend ra `.next/`.
+   - Database: `npm run migrate:prod -w backend` (hoặc để backend tự chạy migration khi khởi động).
+   - Chạy: `npm run start:backend` và `npm run start:frontend`.
 6. Trước khi mở cho người ngoài: làm xong các mục bảo mật còn tồn đọng (WebSocket, CSP, HSTS) và chạy lại
    `security-probe.ts`.
 
@@ -486,12 +510,12 @@ Live room nằm trong một tiến trình server. Nếu chạy nhiều tiến tr
 
 | Hiện tượng | Cách xử lý |
 | --- | --- |
-| "Chưa cấu hình DEEPGRAM_API_KEY / ANTHROPIC_API_KEY" | Điền key vào `.env` ở thư mục gốc rồi khởi động lại `npm run dev:server` |
+| "Chưa cấu hình DEEPGRAM_API_KEY / ANTHROPIC_API_KEY" | Điền key vào `backend/.env` rồi khởi động lại `npm run dev:backend` |
 | "Trình duyệt bị từ chối quyền thu âm" | Bấm biểu tượng ổ khóa trên thanh địa chỉ → cho phép Microphone. Phải mở qua `localhost` hoặc HTTPS |
 | "Thiết bị thu âm đang bị ứng dụng khác chiếm dụng" | Tắt Zoom, Teams hoặc app ghi âm khác |
 | "Không kết nối được Deepgram … HTTP 400" | Tổ hợp mô hình và ngôn ngữ không được hỗ trợ: chọn ngôn ngữ cụ thể hoặc đổi `DEEPGRAM_MODEL` |
 | "Chỉ đăng ký được bằng link mời" | Đúng thiết kế. Xin link từ Owner hoặc Admin, hoặc đặt `ALLOW_SIGNUP=true` trong mạng kín |
-| "Origin không được phép" (403) | Mở app đúng địa chỉ có trong `ALLOWED_ORIGINS` (mặc định `http://localhost:3000`) |
+| "Origin không được phép" (403) | Mở app đúng địa chỉ có trong `ALLOWED_ORIGINS` (mặc định `http://localhost:3001`) |
 | "Đã dùng hết trần chi phí AI" | Tăng `AI_CONFERENCE_CAP_USD` hoặc `AI_WORKSPACE_DAILY_CAP_USD`, rồi khởi động lại server |
 | Máy khác trong mạng không mở được app | Đúng thiết kế: dev server chỉ lắng nghe `127.0.0.1`. Dùng cho nhóm thì cần triển khai HTTPS |
 | Tải file "bị từ chối: nghi là bom giải nén" | File có cấu trúc nén bất thường. Lưu lại file bằng Office (Save As) rồi thử lại |
@@ -500,7 +524,7 @@ Live room nằm trong một tiến trình server. Nếu chạy nhiều tiến tr
 
 ## Lộ trình
 
-1. **Giao diện Smart Response:** cột gợi ý trả lời, upload tài liệu, chọn kiểu trả lời, hiển thị cờ cảnh báo trên bản dịch.
+1. **Smart Response với API thật:** chạy thử phát hiện câu hỏi và gợi ý trả lời với Anthropic key, đo độ trễ và chất lượng trích dẫn.
 2. **Dùng tại hội trường:** giọng đọc bản dịch, chặn im lặng (VAD), thanh điều khiển dưới đáy cho điện thoại, khóa màn hình, nút "Nghe ngay".
 3. **Bảo mật đợt 3–4:** WebSocket thu hồi quyền và giới hạn kết nối, CSP/HSTS, scrypt mạnh hơn, xóa tài khoản và xuất dữ liệu.
 4. **Sau hội nghị:** báo cáo tổng hợp có trích dẫn về từng đoạn transcript, xuất DOCX/PDF.

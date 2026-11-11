@@ -5,3 +5,5 @@ data/
 next-env.d.ts
 *.tsbuildinfo
 coverage/
+.env.local
+dist/

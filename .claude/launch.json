@@ -2,16 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "api",
+      "name": "backend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:server"],
+      "runtimeArgs": ["run", "dev:backend"],
       "port": 4000
     },
     {
-      "name": "web",
+      "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:web"],
-      "port": 3000
+      "runtimeArgs": ["run", "dev:frontend"],
+      "port": 3001
     }
   ]
 }
