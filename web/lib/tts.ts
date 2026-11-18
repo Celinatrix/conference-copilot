@@ -1,5 +1,10 @@
 'use client';
 
+/** Female Vietnamese voices, in order of preference: Edge "HoaiMy" (PC), Apple "Linh" (iPhone/iPad/Mac). */
+const FEMALE_VOICES = [/HoaiMy|Hoai My/i, /\bLinh\b/i];
+/** Male voices are never used: Edge "NamMinh", Windows "Microsoft An". */
+const MALE_VOICE = /NamMinh|Nam Minh|Microsoft An\b|\bmale\b/i;
+
 /**
  * Reads Vietnamese text aloud with the browser's built-in voices (no API cost, works offline on most phones).
  * One shared instance per tab: live translations and "listen" buttons go through the same queue.
@@ -9,16 +14,27 @@ class VietnameseSpeaker {
   private queued = 0;
   private listeners = new Set<() => void>();
 
+  /**
+   * Set while THIS iPhone/iPad records: iOS then routes in-page speech to the loudspeaker even with a headset plugged
+   * in, which would play the translation out loud in the room, so nothing is read until recording stops.
+   */
+  recordingOnAppleMobile = false;
+
   get supported() {
     return typeof window !== 'undefined' && 'speechSynthesis' in window;
   }
 
-  /** The best Vietnamese voice on this device, or null when none is installed. */
+  /** The female Vietnamese voice on this device, or null when it has none (then nothing is read: never a male voice). */
   get voice(): SpeechSynthesisVoice | null {
     if (!this.supported) return null;
-    const vi = speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().replace('_', '-').startsWith('vi'));
-    // Natural/online voices sound far better than the legacy offline ones.
-    return vi.find((v) => /natural|online|google/i.test(v.name)) ?? vi[0] ?? null;
+    const female = speechSynthesis
+      .getVoices()
+      .filter((v) => v.lang.toLowerCase().replace('_', '-').startsWith('vi') && !MALE_VOICE.test(v.name));
+    for (const preferred of FEMALE_VOICES) {
+      const match = female.find((v) => preferred.test(v.name));
+      if (match) return match;
+    }
+    return null;
   }
 
   /** Voices load asynchronously; subscribers re-render once they arrive. */
@@ -46,12 +62,14 @@ class VietnameseSpeaker {
    */
   say(text: string, { interrupt = false }: { interrupt?: boolean } = {}) {
     const clean = text.replace(/\((suy luận|inference)\)/gi, '').trim();
-    if (!this.supported || !clean) return;
+    if (!this.supported || !clean || this.recordingOnAppleMobile) return;
+    // No female Vietnamese voice: stay silent rather than let the browser pick a default (possibly male) voice.
+    const voice = this.voice;
+    if (!voice) return;
     if (interrupt || this.queued >= 3) this.stop();
     const u = new SpeechSynthesisUtterance(clean);
     u.lang = 'vi-VN';
-    const voice = this.voice;
-    if (voice) u.voice = voice;
+    u.voice = voice;
     u.rate = this.rate;
     this.queued++;
     const done = () => {
@@ -69,6 +87,12 @@ class VietnameseSpeaker {
     speechSynthesis.cancel();
     this.queued = 0;
   }
+}
+
+/** iPhone/iPad (iPadOS reports itself as a Mac with touch). */
+export function isAppleMobile(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
 export const speaker = new VietnameseSpeaker();

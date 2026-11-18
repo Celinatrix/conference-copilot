@@ -53,7 +53,7 @@ export type ServerEvent =
   | { type: 'segment'; segment: SegmentDto }
   | { type: 'segment.updated'; segment: SegmentDto }
   | { type: 'translation.delta'; segmentId: string; delta: string }
-  | { type: 'translation.done'; segmentId: string; text_vi: string; latencyMs: number | null; flags: string[] }
+  | { type: 'translation.done'; segmentId: string; text_vi: string; latencyMs: number | null; flags: string[]; skipped?: boolean }
   | { type: 'question'; question: import('../ai/service.js').QuestionDto }
   | { type: 'answer.delta'; questionId: string; delta: string }
   | { type: 'translation.error'; segmentId: string; message: string }

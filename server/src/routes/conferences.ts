@@ -6,7 +6,7 @@ import { audit, getConferenceAccess, primaryWorkspace, type ConferenceRow } from
 import { formatTranscript } from '../export.js';
 import { toSegmentDto } from '../live/room.js';
 import { conferenceUsage } from '../usage.js';
-import { RESPONSE_MODE_KEYS, type ResponseMode } from '../ai/responder.js';
+import { ANSWER_MODEL_KEYS, RESPONSE_MODE_KEYS, type AnswerModelChoice, type ResponseMode } from '../ai/responder.js';
 import { computeFlags } from '../ai/trust.js';
 
 const LANGUAGE = z.string().regex(/^(multi|[a-z]{2,3}(-[A-Za-z0-9]{2,8})?)$/, 'Mã ngôn ngữ không hợp lệ');
@@ -26,6 +26,10 @@ const ConferencePatch = ConferenceInput.partial().extend({
     .min(1, 'Chọn ít nhất 1 kiểu trả lời')
     .max(3, 'Tối đa 3 kiểu trả lời')
     .optional(),
+});
+const ConferencePatchWithModel = ConferencePatch.extend({
+  // null = back to the server default draft model.
+  answer_model: z.enum(ANSWER_MODEL_KEYS as [AnswerModelChoice, ...AnswerModelChoice[]]).nullable().optional(),
 });
 const JSON_COLUMNS = new Set(['response_modes']);
 
@@ -114,7 +118,7 @@ export function conferenceRoutes(app: FastifyInstance, ctx: AppContext) {
     const access = await getConferenceAccess(db, id, req.user!.id);
     if (!access) return notFound(reply);
     if (!access.canManage) return forbidden(reply);
-    const patch = ConferencePatch.parse(req.body);
+    const patch = ConferencePatchWithModel.parse(req.body);
     const fields = Object.entries(patch).filter(([, v]) => v !== undefined);
     if (!fields.length) return { conference: publicConference(access.conference, access) };
     const sets = fields.map(([k], i) => `${k} = $${i + 2}${JSON_COLUMNS.has(k) ? '::jsonb' : ''}`).join(', ');

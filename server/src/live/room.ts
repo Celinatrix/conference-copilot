@@ -371,7 +371,8 @@ class LiveRoom {
         .translateSegment(segment, conference, context, receivedAt)
         .then((vi) => {
           entry.vi = vi;
-          void this.deps.audio?.say(conference.id, vi);
+          // Speech already in Vietnamese is not read back (see translation.done `skipped`).
+          if (!segment.language?.toLowerCase().startsWith('vi')) void this.deps.audio?.say(conference.id, vi);
           // Fire-and-forget: question detection must never hold up the translation queue.
           void this.deps.questions?.onSegmentTranslated(segment, vi, conference, context.map((c) => c.original));
         })
@@ -478,6 +479,9 @@ export class LiveManager {
       this.broadcast(conferenceId, {
         type: 'translation.done',
         segmentId: segment.id,
+        // Already Vietnamese (nothing translated): listeners must not read it aloud, or a loudspeaker near the
+        // microphone would feed its own speech back in as new "speech" in a loop.
+        skipped: status === 'skipped',
         text_vi: text,
         latencyMs: receivedAt === null ? null : Date.now() - receivedAt,
         flags,

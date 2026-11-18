@@ -57,6 +57,8 @@ export interface Conference {
   updated_at: string;
   segment_count?: number;
   response_modes?: ResponseMode[];
+  /** null = server default (Haiku first drafts). */
+  answer_model?: string | null;
   permissions?: { canManage: boolean; canDelete: boolean };
 }
 
@@ -106,10 +108,29 @@ export interface Question {
   source: 'auto' | 'manual';
   text_original: string;
   text_vi: string | null;
-  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click';
+  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click' | 'awaiting_confirm' | 'dismissed';
   error: string | null;
+  unclear_reason: string | null;
   answer: StructuredAnswer | null;
+  answer_model: string | null;
   created_at: string;
+}
+
+/** Models a conference can pick for drafting answers (must match the server's ANSWER_MODEL_CHOICES). */
+export const ANSWER_MODELS: { id: string; name: string; note: string; cost: string }[] = [
+  { id: 'claude-haiku-5-5', name: 'Haiku 5.5', note: 'Nhanh, rẻ nhất', cost: '~$0.002/câu' },
+  { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', note: 'Lập luận chặt hơn', cost: '~$0.08/câu' },
+  { id: 'claude-opus-5-5', name: 'Opus 5.5', note: 'Tốt nhất, chậm hơn', cost: '~$0.15/câu' },
+];
+export const DEFAULT_ANSWER_MODEL = 'claude-haiku-5-5';
+
+/** Short display name for the model that drafted an answer. */
+export function modelLabel(model: string | null): string {
+  if (!model) return '';
+  if (model.includes('haiku')) return 'Haiku · nháp nhanh';
+  if (model.includes('sonnet')) return 'Sonnet · soạn kỹ';
+  if (model.includes('opus')) return 'Opus · soạn kỹ';
+  return model;
 }
 
 export interface Segment {

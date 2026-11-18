@@ -10,6 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -92,7 +93,58 @@ function startTunnel(creds, listenPort, targetPort) {
     upstream.on('error', close);
     client.pipe(upstream).pipe(client);
   });
-  server.on('tlsClientError', () => {}); // phone not trusting the certificate yet: nothing to do here
+  server.on('tlsClientError', (err, socket) => logTlsError(listenPort, err, socket));
+  server.listen(listenPort, '0.0.0.0');
+  return server;
+}
+
+const tlsErrorsSeen = new Set();
+/** A phone that does not trust the certificate fails here, silently on its side: say so once per device and port. */
+function logTlsError(port, err, socket) {
+  const key = `${socket?.remoteAddress}:${port}:${err?.code ?? err?.message}`;
+  if (tlsErrorsSeen.has(key)) return;
+  tlsErrorsSeen.add(key);
+  console.log(`⚠ Kết nối HTTPS cổng ${port} từ ${socket?.remoteAddress ?? '?'} bị từ chối: ${err?.code ?? ''} ${err?.message ?? ''}`.trim());
+  console.log('  Nếu là iPhone: kiểm tra Cài đặt → Cài đặt chung → Giới thiệu → Cài đặt tin cậy chứng nhận → bật "Conference Copilot Local CA".');
+}
+
+/**
+ * The app port (3443): an HTTP-aware proxy so the page, the API and the live WebSocket share ONE origin.
+ * Safari applies certificate trust (and any "visit anyway" exception) per host and port, and never shows a prompt
+ * for a WebSocket, so a socket on a second port can fail while the page loads fine. Here /ws upgrades go to the API
+ * server and everything else to the web app, all on 3443.
+ */
+function startAppProxy(creds, listenPort) {
+  const server = https.createServer({ key: creds.key, cert: creds.cert }, (req, res) => {
+    const upstream = http.request(
+      { host: '127.0.0.1', port: 3000, method: req.method, path: req.url, headers: req.headers },
+      (upRes) => {
+        res.writeHead(upRes.statusCode ?? 502, upRes.headers);
+        upRes.pipe(res); // streams (live MP3, server-sent chunks) pass through as they arrive
+      },
+    );
+    upstream.on('error', () => {
+      if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Web app (cổng 3000) chưa chạy: npm run dev:web:lan');
+    });
+    req.pipe(upstream);
+  });
+  server.on('upgrade', (req, socket, head) => {
+    const target = req.url?.startsWith('/ws') ? 4000 : 3000; // live socket -> API; anything else (dev reload) -> web
+    const upstream = net.connect(target, '127.0.0.1', () => {
+      const headers = Object.entries(req.headers).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('\r\n');
+      upstream.write(`${req.method} ${req.url} HTTP/1.1\r\n${headers}\r\n\r\n`);
+      if (head?.length) upstream.write(head);
+      upstream.pipe(socket).pipe(upstream);
+    });
+    const close = () => {
+      socket.destroy();
+      upstream.destroy();
+    };
+    socket.on('error', close);
+    upstream.on('error', close);
+  });
+  server.on('tlsClientError', (err, socket) => logTlsError(listenPort, err, socket));
   server.listen(listenPort, '0.0.0.0');
   return server;
 }
@@ -114,7 +166,9 @@ ol{padding-left:22px}li{margin:8px 0}code{background:#0d1424;padding:2px 6px;bor
 </main></body></html>`;
 
 const creds = ensureCerts();
-for (const [listen, target] of PAIRS) startTunnel(creds, listen, target);
+startAppProxy(creds, 3443);
+// 4443 stays as a plain tunnel to the API for older pages that still open the socket there.
+startTunnel(creds, 4443, 4000);
 http
   .createServer((req, res) => {
     if (req.url === '/copilot-ca.crt') {

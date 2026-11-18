@@ -19,7 +19,7 @@ export type LiveEvent =
   | { type: 'segment'; segment: Segment }
   | { type: 'segment.updated'; segment: Segment }
   | { type: 'translation.delta'; segmentId: string; delta: string }
-  | { type: 'translation.done'; segmentId: string; text_vi: string; latencyMs: number | null }
+  | { type: 'translation.done'; segmentId: string; text_vi: string; latencyMs: number | null; skipped?: boolean }
   | { type: 'translation.error'; segmentId: string; message: string }
   | { type: 'question'; question: Question }
   | { type: 'answer.delta'; questionId: string; delta: string }
@@ -35,9 +35,10 @@ function wsBase() {
   const configured = process.env.NEXT_PUBLIC_WS_URL;
   if (configured) return configured;
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  // Secure LAN mode (npm run dev:https) serves the app on 3443 and the API/WebSocket on 4443.
-  const port = window.location.protocol === 'https:' && window.location.port === '3443' ? 4443 : 4000;
-  return `${proto}://${window.location.hostname}:${port}`;
+  // Secure LAN mode (npm run dev:https): the socket shares the page's origin (https on 3443), so the certificate trust
+  // Safari gave the page also covers the socket.
+  if (window.location.protocol === 'https:' && window.location.port === '3443') return `${proto}://${window.location.host}`;
+  return `${proto}://${window.location.hostname}:4000`;
 }
 
 /**

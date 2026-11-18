@@ -13,6 +13,14 @@ function num(name: string, fallback: number): number {
   return n;
 }
 
+export interface AnswerModelPricing {
+  model: string;
+  inputUsdPerMTok: number;
+  outputUsdPerMTok: number;
+  cacheReadUsdPerMTok: number;
+  cacheWriteUsdPerMTok: number;
+}
+
 export interface AppConfig {
   port: number;
   host: string;
@@ -46,6 +54,8 @@ export interface AppConfig {
     cacheWriteUsdPerMTok: number;
     /** Auto-suggestions stop (and wait for a click) once a conference's answer spend reaches this. 0 = unlimited. */
     autoBudgetUsd: number;
+    /** Cheaper model for first drafts; `model` above is the "draft more carefully" tier. */
+    fast: AnswerModelPricing;
   };
   /** Segments whose recognition confidence is below this are flagged in the translation. */
   lowConfidenceThreshold: number;
@@ -94,6 +104,14 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       cacheReadUsdPerMTok: num('ANSWER_CACHE_READ_USD_PER_MTOK', 0.2),
       cacheWriteUsdPerMTok: num('ANSWER_CACHE_WRITE_USD_PER_MTOK', 2.5),
       autoBudgetUsd: num('ANSWER_AUTO_BUDGET_USD', 1),
+      // Cheap first draft for every question; the model above is used when the listener asks for a better one.
+      fast: {
+        model: process.env.ANSWER_FAST_MODEL || 'claude-haiku-5-5',
+        inputUsdPerMTok: num('ANSWER_FAST_INPUT_USD_PER_MTOK', 0.1),
+        outputUsdPerMTok: num('ANSWER_FAST_OUTPUT_USD_PER_MTOK', 0.5),
+        cacheReadUsdPerMTok: num('ANSWER_FAST_CACHE_READ_USD_PER_MTOK', 0.01),
+        cacheWriteUsdPerMTok: num('ANSWER_FAST_CACHE_WRITE_USD_PER_MTOK', 0.125),
+      },
     },
     lowConfidenceThreshold: num('LOW_CONFIDENCE_THRESHOLD', 0.75),
     costCaps: {

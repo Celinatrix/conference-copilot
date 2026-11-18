@@ -193,6 +193,35 @@ export function parseAnswer(pieces: TextPiece[], docMap: ContextChunk[][], modes
   return { analysis_vi: analysis, options, missing: /^không có\.?$/i.test(missing) ? '' : missing, follow_ups: followUps };
 }
 
+/** Models a conference may pick for drafting answers, with list prices used for the cost estimate (USD / 1M tokens). */
+export const ANSWER_MODEL_CHOICES = {
+  'claude-haiku-5-5': { inputUsdPerMTok: 0.1, outputUsdPerMTok: 0.5, cacheReadUsdPerMTok: 0.01, cacheWriteUsdPerMTok: 0.125 },
+  'claude-sonnet-5-5': { inputUsdPerMTok: 2, outputUsdPerMTok: 10, cacheReadUsdPerMTok: 0.1, cacheWriteUsdPerMTok: 2.5 },
+  'claude-opus-5-5': { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadUsdPerMTok: 0.2, cacheWriteUsdPerMTok: 5 },
+} as const;
+export type AnswerModelChoice = keyof typeof ANSWER_MODEL_CHOICES;
+export const ANSWER_MODEL_KEYS = Object.keys(ANSWER_MODEL_CHOICES) as AnswerModelChoice[];
+
+/**
+ * Per-family request options. Answers are needed within seconds of the question, so extended reasoning is
+ * skipped wherever the model allows it; each family accepts a different way of doing that.
+ */
+export function modelOptions(model: string): Pick<
+  Anthropic.Beta.MessageCreateParamsStreaming,
+  'thinking' | 'output_config' | 'betas' | 'fallbacks'
+> {
+  if (model.startsWith('claude-haiku-5')) {
+    // Haiku 5.5: thinking can be disabled at effort high or below; no server-side refusal fallback exists.
+    return { thinking: { type: 'disabled' }, output_config: { effort: 'medium' } };
+  }
+  if (model.startsWith('claude-sonnet-5-5')) {
+    // Sonnet 5.5 turns thinking off with `between_tools` ({type:'disabled'} is rejected).
+    return { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', thinking: { type: 'between_tools' }, output_config: { effort: 'medium' } };
+  }
+  // Opus 5.5 and others: thinking cannot be disabled, so keep it shallow with low effort.
+  return { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', output_config: { effort: 'low' } };
+}
+
 export interface AnswerResult {
   answer: Omit<StructuredAnswer, 'context'>;
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number };
@@ -222,11 +251,7 @@ export class Responder {
     const stream = this.client.beta.messages.stream({
       model: this.model,
       max_tokens: 4000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      // Answers are needed within seconds of the question; skip extended reasoning.
-      thinking: { type: 'between_tools' },
-      output_config: { effort: 'medium' },
+      ...modelOptions(this.model),
       system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
       messages: [
         {

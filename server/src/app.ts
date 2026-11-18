@@ -43,7 +43,7 @@ const MAX_AUDIO_FRAME_BYTES = 64 * 1024;
 export async function buildApp(
   db: Db,
   config: AppConfig,
-  opts: { logger?: boolean; stt?: SttProvider; translator?: Translator; detector?: QuestionDetector; responder?: Responder } = {},
+  opts: { logger?: boolean; stt?: SttProvider; translator?: Translator; detector?: QuestionDetector; responder?: Responder; fastResponder?: Responder } = {},
 ): Promise<{ app: FastifyInstance; ctx: AppContext }> {
   const app = Fastify({
     logger: opts.logger === false ? false : { level: process.env.LOG_LEVEL || 'info' },
@@ -59,12 +59,25 @@ export async function buildApp(
   const audio = new AudioService(new WindowsTts(config.tts.lang, config.tts.rate, app.log), app.log);
   app.addHook('onClose', async () => audio.tts.stop());
   const live = new LiveManager({ db, config, stt, translator, audio, log: app.log });
+  const responders = new Map<string, Responder>();
   const questions = new QuestionService({
     db,
     config,
     detector: opts.detector ?? new QuestionDetector(config.anthropic.apiKey, config.anthropic.translationModel),
-    responder: opts.responder ?? new Responder(config.anthropic.apiKey, config.answers.model),
+    responderFor: (model) => {
+      // Tests inject fakes: the "quality" one for ANSWER_MODEL, the "fast" one for everything else.
+      if (opts.responder || opts.fastResponder) {
+        return model === config.answers.model ? (opts.responder ?? opts.fastResponder!) : (opts.fastResponder ?? opts.responder!);
+      }
+      let r = responders.get(model);
+      if (!r) {
+        r = new Responder(config.anthropic.apiKey, model);
+        responders.set(model, r);
+      }
+      return r;
+    },
     broadcast: (conferenceId, event) => live.broadcast(conferenceId, event),
+    announce: (conferenceId, text) => void audio.say(conferenceId, text),
     log: app.log,
   });
   live.attachQuestions(questions);
@@ -113,7 +126,7 @@ export async function buildApp(
     database: db.kind,
     stt: { provider: stt.name, configured: stt.configured, model: config.deepgram.model },
     translation: { provider: 'anthropic', configured: translator.configured, model: translator.model },
-    answers: { provider: 'anthropic', configured: questions.configured, model: config.answers.model, autoBudgetUsd: config.answers.autoBudgetUsd },
+    answers: { provider: 'anthropic', configured: questions.configured, model: config.answers.model, fastModel: config.answers.fast.model, autoBudgetUsd: config.answers.autoBudgetUsd },
   }));
 
   await app.register(async (scope) => authRoutes(scope, ctx));
