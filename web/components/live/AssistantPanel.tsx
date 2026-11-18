@@ -5,6 +5,7 @@ import {
   ANSWER_MODELS,
   api,
   DEFAULT_ANSWER_MODEL,
+  isComment,
   modelLabel,
   questionLabel,
   RESPONSE_MODE_LABELS,
@@ -122,8 +123,10 @@ export function AssistantPanel(props: {
 
   // Questions waiting for confirmation come first: they block an answer until the listener acts.
   const visible = questions
-    .filter((q) => q.status !== 'dismissed')
+    .filter((q) => q.status !== 'dismissed' && !isComment(q))
     .sort((a, b) => Number(b.status === 'awaiting_confirm') - Number(a.status === 'awaiting_confirm'));
+  // Judges' remarks on the presentation: listed apart from the questions, newest first, never answered.
+  const comments = questions.filter((q) => q.status !== 'dismissed' && isComment(q));
 
   const toggleMode = async (m: ResponseMode) => {
     const next = modes.includes(m) ? modes.filter((x) => x !== m) : [...modes, m];
@@ -299,6 +302,23 @@ export function AssistantPanel(props: {
         </ul>
       </div>
 
+      {/* Judges' remarks (not questions): nothing to answer, kept so the team can respond to them in the closing. */}
+      {comments.length > 0 && (
+        <div>
+          <div className="mb-2 flex items-center justify-between text-xs font-medium tracking-[0.18em] text-faint uppercase">
+            <span>Nhận xét của BTC</span>
+            <span className="text-warn">{comments.length}</span>
+          </div>
+          <ul className="space-y-2">
+            {comments.map((c) => (
+              <li key={c.id}>
+                <CommentCard c={c} onDismiss={() => void dismiss(c)} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <Dialog open={Boolean(zoomed)} onClose={() => setZoomId(null)} title="Gợi ý trả lời" wide>
         {zoomed && (
           <QuestionCard
@@ -320,6 +340,25 @@ export function QuestionNumber({ q, big }: { q: Question; big?: boolean }) {
     <span className={`mb-1 inline-block rounded-md bg-electric/20 px-2 py-0.5 font-semibold text-electric tabular-nums ${big ? 'text-sm' : 'text-xs'}`}>
       {questionLabel(q)}
     </span>
+  );
+}
+
+/** A judge's remark on the presentation: Vietnamese first, the original below; no answer is drafted for it. */
+function CommentCard({ c, onDismiss }: { c: Question; onDismiss: () => void }) {
+  return (
+    <div className="rounded-xl border border-warn/40 bg-warn/5 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          {c.seq && (
+            <span className="mb-1 inline-block rounded-md bg-warn/20 px-2 py-0.5 text-xs font-semibold text-warn tabular-nums">{questionLabel(c)}</span>
+          )}
+          <p className="text-sm font-medium">{c.text_vi ?? c.text_original}</p>
+          {c.text_vi && c.text_vi !== c.text_original && <p className="mt-0.5 text-xs text-muted">{c.text_original}</p>}
+        </div>
+        <DismissButton onClick={onDismiss} />
+      </div>
+      <p className="mt-1.5 text-[11px] text-faint">Nhận xét, không phải câu hỏi: app không soạn trả lời.</p>
+    </div>
   );
 }
 

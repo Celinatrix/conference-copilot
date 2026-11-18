@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeQuestion } from '../src/ai/questions.js';
+import { looksLikeFeedback, looksLikeQuestion } from '../src/ai/questions.js';
 import { buildDocumentBlocks, parseAnswer } from '../src/ai/responder.js';
 import { computeFlags, numberKeys, parseGlossary } from '../src/ai/trust.js';
 import { normalizeModes } from '../src/ai/service.js';
 import { AudioTimeline } from '../src/live/timeline.js';
 import type { ContextChunk } from '../src/kb/retrieve.js';
+
+describe('looksLikeFeedback', () => {
+  it('lets judges’ remarks through to the classifier', () => {
+    expect(looksLikeFeedback('I think you should add a sensitivity test on inflation.')).toBe(true);
+    expect(looksLikeFeedback('Overall a very clear presentation, well done.')).toBe(true);
+    expect(looksLikeFeedback('My only concern is the size of the reserve buffer.')).toBe(true);
+    expect(looksLikeFeedback('Theo tôi nhóm nên bổ sung phân tích độ nhạy.')).toBe(true);
+  });
+  it('skips ordinary presentation sentences', () => {
+    expect(looksLikeFeedback('Our loss ratio improved by four points.')).toBe(false);
+    expect(looksLikeFeedback('Next slide please.')).toBe(false);
+  });
+});
 
 describe('looksLikeQuestion', () => {
   it('accepts punctuated and unpunctuated questions in several languages', () => {

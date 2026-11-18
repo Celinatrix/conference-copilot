@@ -4,7 +4,7 @@ import type { ConferenceRow } from '../access.js';
 import type { ServerEvent, SegmentDto } from '../live/protocol.js';
 import { recordUsage, tokenCost } from '../usage.js';
 import { selectContext } from '../kb/retrieve.js';
-import { looksLikeQuestion, type QuestionDetector } from './questions.js';
+import { looksLikeFeedback, looksLikeQuestion, type QuestionDetector } from './questions.js';
 import {
   ANSWER_MODEL_CHOICES,
   RESPONSE_MODE_KEYS,
@@ -20,10 +20,12 @@ export interface QuestionDto {
   conference_id: string;
   segment_id: string | null;
   source: 'auto' | 'manual';
+  /** 'comment' = a judge's remark on the presentation (status 'noted'): listed, never answered. */
+  kind: 'question' | 'comment';
   text_original: string;
   text_vi: string | null;
   language: string | null;
-  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click' | 'awaiting_confirm' | 'dismissed';
+  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click' | 'awaiting_confirm' | 'dismissed' | 'noted';
   error: string | null;
   /** Why the listener is asked to confirm the question (status 'awaiting_confirm'). */
   unclear_reason: string | null;
@@ -65,7 +67,9 @@ export interface QuestionDeps {
 }
 
 /** "Câu N": the next number in the conference ($1). Removed questions keep theirs, so numbers never shift. */
-const NEXT_QUESTION_SEQ = `(SELECT COALESCE(MAX(seq), 0) + 1 FROM questions WHERE conference_id = $1)`;
+const NEXT_QUESTION_SEQ = `(SELECT COALESCE(MAX(seq), 0) + 1 FROM questions WHERE conference_id = $1 AND kind = 'question')`;
+/** "Nhận xét N": remarks are numbered separately, so they never leave gaps in the question numbers. */
+const NEXT_COMMENT_SEQ = `(SELECT COALESCE(MAX(seq), 0) + 1 FROM questions WHERE conference_id = $1 AND kind = 'comment')`;
 
 /** Answers waiting per conference beyond which new manual requests are refused. */
 export const MAX_QUEUED_ANSWERS = 5;
@@ -101,13 +105,18 @@ export class QuestionService {
     return Number(spent ?? 0);
   }
 
-  /** Called after each segment is translated. Cheap filter first; the classifier only sees likely questions. */
+  /**
+   * Called after each segment is translated. Cheap filter first; the classifier only sees likely questions and likely
+   * remarks. It sorts the line into a question to the team (popup, answer on request), a remark on the presentation
+   * (listed as "Nhận xét", never answered), both (split into one of each), or neither.
+   */
   async onSegmentTranslated(segment: SegmentDto, vi: string | null, conference: ConferenceRow, previous: string[]) {
     const { detector, db, config } = this.deps;
-    if (!detector.configured || !looksLikeQuestion(segment.text_original)) return;
+    if (!detector.configured) return;
+    if (!looksLikeQuestion(segment.text_original) && !looksLikeFeedback(segment.text_original) && !(vi && looksLikeFeedback(vi))) return;
     try {
       if (!(await this.guard.check(conference.workspace_id, conference.id)).ok) return;
-      const { detection, inputTokens, outputTokens } = await detector.detect({ current: segment.text_original, currentVi: vi, previous: previous.slice(-2) });
+      const { detection, inputTokens, outputTokens } = await detector.detect({ current: segment.text_original, currentVi: vi, previous: previous.slice(-4) });
       await recordUsage(db, {
         workspaceId: conference.workspace_id,
         conferenceId: conference.id,
@@ -117,8 +126,12 @@ export class QuestionService {
         unit: 'token',
         costUsd: tokenCost(inputTokens, outputTokens, config.anthropic.inputUsdPerMTok, config.anthropic.outputUsdPerMTok),
       });
-      // Only questions put to the listener's team (by judges / organizers / audience) are surfaced.
-      if (!detection.is_question || !detection.worth_answering || !detection.for_presenting_team) return;
+      // Only lines put to the listener's team (by judges / organizers / audience) are surfaced.
+      if (!detection.for_presenting_team) return;
+      const hasComment = detection.kind === 'comment' || detection.kind === 'comment_with_question';
+      if (hasComment) await this.saveComment(conference, segment, detection.comment || segment.text_original, detection.comment_vi || vi);
+      const hasQuestion = detection.kind === 'question' || detection.kind === 'comment_with_question';
+      if (!hasQuestion || !detection.is_question || !detection.worth_answering || !detection.question.trim()) return;
 
       // A question heard badly is confirmed by the listener first: an answer to the wrong question is worse than none.
       const lowConfidence = segment.confidence !== null && segment.confidence < config.lowConfidenceThreshold;
@@ -135,7 +148,15 @@ export class QuestionService {
       const [row] = await db.query(
         `INSERT INTO questions (conference_id, segment_id, source, text_original, text_vi, language, status, unclear_reason, seq)
          VALUES ($1, $2, 'auto', $3, $4, $5, $6, $7, ${NEXT_QUESTION_SEQ}) RETURNING *`,
-        [conference.id, segment.id, detection.question || segment.text_original, detection.question_vi || vi, segment.language, status, unclear ? reasons.join(' ') : null],
+        [
+          conference.id,
+          segment.id,
+          detection.question,
+          detection.question_vi || (hasComment ? null : vi),
+          segment.language,
+          status,
+          unclear ? reasons.join(' ') : null,
+        ],
       );
       const question = toQuestionDto(row);
       await this.dropSupersededFragments(conference.id, question);
@@ -144,6 +165,16 @@ export class QuestionService {
     } catch (err) {
       this.deps.log.warn({ err, segmentId: segment.id }, 'question detection failed');
     }
+  }
+
+  /** A judge's remark on the presentation: listed as "Nhận xét N" (own numbering), no popup, no answer, no cost beyond detection. */
+  private async saveComment(conference: ConferenceRow, segment: SegmentDto, text: string, textVi: string | null) {
+    const [row] = await this.deps.db.query(
+      `INSERT INTO questions (conference_id, segment_id, source, kind, text_original, text_vi, language, status, seq)
+       VALUES ($1, $2, 'auto', 'comment', $3, $4, $5, 'noted', ${NEXT_COMMENT_SEQ}) RETURNING *`,
+      [conference.id, segment.id, text, textVi, segment.language],
+    );
+    this.emit(toQuestionDto(row));
   }
 
   async createManual(conference: ConferenceRow, text: string, segmentId: string | null, textVi: string | null, language: string | null): Promise<QuestionDto> {
