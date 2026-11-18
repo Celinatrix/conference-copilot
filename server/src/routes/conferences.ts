@@ -4,6 +4,7 @@ import type { AppContext } from '../app.js';
 import { AttemptLimiter, requireUser } from '../auth.js';
 import { audit, getConferenceAccess, primaryWorkspace, type ConferenceRow } from '../access.js';
 import { formatTranscript } from '../export.js';
+import { buildTranscriptPdf } from '../export-pdf.js';
 import { toSegmentDto } from '../live/room.js';
 import { conferenceUsage } from '../usage.js';
 import { ANSWER_MODEL_KEYS, RESPONSE_MODE_KEYS, type AnswerModelChoice, type ResponseMode } from '../ai/responder.js';
@@ -241,13 +242,20 @@ export function conferenceRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.get('/api/conferences/:id/export', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const q = z.object({ format: z.enum(['md', 'txt']).default('md'), view: z.enum(['both', 'original', 'vi']).default('both') }).parse(req.query);
+    const q = z.object({ format: z.enum(['md', 'txt', 'pdf']).default('md'), view: z.enum(['both', 'original', 'vi']).default('both') }).parse(req.query);
     const access = await getConferenceAccess(db, id, req.user!.id);
     if (!access) return notFound(reply);
     const rows = await db.query('SELECT * FROM segments WHERE conference_id = $1 ORDER BY seq', [id]);
-    const body = formatTranscript(access.conference, rows.map(toSegmentDto), q.format, q.view);
     const safeName = access.conference.name.replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 80) || 'transcript';
     await audit(db, { workspaceId: access.conference.workspace_id, userId: req.user!.id, action: 'transcript.export', targetType: 'conference', targetId: id, meta: q });
+    if (q.format === 'pdf') {
+      const pdf = await buildTranscriptPdf(access.conference, rows.map(toSegmentDto), q.view);
+      return reply
+        .header('Content-Type', 'application/pdf')
+        .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${safeName}.pdf`)}`)
+        .send(Buffer.from(pdf));
+    }
+    const body = formatTranscript(access.conference, rows.map(toSegmentDto), q.format, q.view);
     return reply
       .header('Content-Type', q.format === 'md' ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8')
       .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${safeName}.${q.format}`)}`)
