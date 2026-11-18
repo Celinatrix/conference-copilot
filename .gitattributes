@@ -1,0 +1,13 @@
+# One line-ending style in the repository (LF) whatever the editor or OS, so diffs stay clean and
+# "LF will be replaced by CRLF" warnings stop. Windows-only scripts keep CRLF.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.wav binary
+*.mp3 binary

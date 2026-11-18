@@ -1,0 +1,20 @@
+{
+  // Hide generated and local-only folders from the Explorer (they still exist on disk; nothing is deleted).
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/.next-build": true,
+    "**/*.tsbuildinfo": true,
+    "**/next-env.d.ts": true,
+    "web/AGENTS.md": true,
+    "data": true,
+    "certs": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/package-lock.json": true
+  },
+  "files.eol": "\n",
+  "typescript.tsdk": "node_modules/typescript/lib"
+}
