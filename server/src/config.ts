@@ -54,6 +54,8 @@ export interface AppConfig {
     cacheWriteUsdPerMTok: number;
     /** Auto-suggestions stop (and wait for a click) once a conference's answer spend reaches this. 0 = unlimited. */
     autoBudgetUsd: number;
+    /** Detected questions wait for the listener to choose "Trả lời" or "Skip" before an answer is drafted. */
+    requireConfirm: boolean;
     /** Cheaper model for first drafts; `model` above is the "draft more carefully" tier. */
     fast: AnswerModelPricing;
   };
@@ -110,6 +112,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       cacheReadUsdPerMTok: num('ANSWER_CACHE_READ_USD_PER_MTOK', 0.2),
       cacheWriteUsdPerMTok: num('ANSWER_CACHE_WRITE_USD_PER_MTOK', 2.5),
       autoBudgetUsd: num('ANSWER_AUTO_BUDGET_USD', 1),
+      requireConfirm: process.env.ANSWER_REQUIRE_CONFIRM !== 'false',
       // Cheap first draft for every question; the model above is used when the listener asks for a better one.
       fast: {
         model: process.env.ANSWER_FAST_MODEL || 'claude-haiku-5-5',

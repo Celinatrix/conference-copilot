@@ -111,6 +111,8 @@ export interface Question {
   status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click' | 'awaiting_confirm' | 'dismissed';
   error: string | null;
   unclear_reason: string | null;
+  /** "Câu N" in the conference, in the order questions were asked (kept when others are removed). */
+  seq: number | null;
   answer: StructuredAnswer | null;
   answer_model: string | null;
   created_at: string;
@@ -123,6 +125,11 @@ export const ANSWER_MODELS: { id: string; name: string; note: string; cost: stri
   { id: 'claude-opus-5-5', name: 'Opus 5.5', note: 'Tốt nhất, chậm hơn', cost: '~$0.15/câu' },
 ];
 export const DEFAULT_ANSWER_MODEL = 'claude-haiku-5-5';
+
+/** "Câu 3" label for a question (empty for rows created before numbering existed and not yet backfilled). */
+export function questionLabel(q: Pick<Question, 'seq'>): string {
+  return q.seq ? `Câu ${q.seq}` : '';
+}
 
 /** Short display name for the model that drafted an answer. */
 export function modelLabel(model: string | null): string {

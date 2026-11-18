@@ -6,6 +6,7 @@ import {
   api,
   DEFAULT_ANSWER_MODEL,
   modelLabel,
+  questionLabel,
   RESPONSE_MODE_LABELS,
   type Conference,
   type KbDocument,
@@ -313,6 +314,15 @@ export function AssistantPanel(props: {
   );
 }
 
+/** "Câu 3" chip: the question's number in the order it was asked. */
+export function QuestionNumber({ q, big }: { q: Question; big?: boolean }) {
+  return (
+    <span className={`mb-1 inline-block rounded-md bg-electric/20 px-2 py-0.5 font-semibold text-electric tabular-nums ${big ? 'text-sm' : 'text-xs'}`}>
+      {questionLabel(q)}
+    </span>
+  );
+}
+
 /** "X": removes a question from the list for everyone following the conference. */
 function DismissButton({ onClick }: { onClick: () => void }) {
   return (
@@ -336,7 +346,9 @@ function ConfirmCard({ q, onConfirm, onDismiss }: { q: Question; onConfirm: (tex
   return (
     <div className="rounded-xl border-2 border-warn/60 bg-warn/10 p-3" role="alert">
       <div className="flex items-start justify-between gap-2">
-        <div className="text-sm font-medium text-warn">⚠ Nghe chưa rõ câu hỏi, hãy xác nhận</div>
+        <div className="flex items-center gap-2 text-sm font-medium text-warn">
+          {q.seq && <QuestionNumber q={q} />}⚠ Nghe chưa rõ câu hỏi, hãy xác nhận
+        </div>
         <DismissButton onClick={onDismiss} />
       </div>
       {q.unclear_reason && <p className="mt-1 text-xs text-muted">{q.unclear_reason}</p>}
@@ -396,6 +408,7 @@ function QuestionCard({
     <div className="rounded-xl border border-line bg-navy/50 p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
+          {q.seq && <QuestionNumber q={q} big={big} />}
           <p className={`font-medium ${big ? 'text-lg' : 'text-sm'}`}>{q.text_original}</p>
           {q.text_vi && q.text_vi !== q.text_original && <p className="mt-0.5 text-xs text-muted">{q.text_vi}</p>}
         </div>
@@ -428,7 +441,9 @@ function QuestionCard({
         </div>
       )}
       {q.status === 'awaiting_click' && (
-        <Button className="mt-2 w-full" onClick={onReanswer}>Đã hết ngân sách tự động. Bấm để soạn gợi ý</Button>
+        <Button variant="primary" className="mt-2 w-full" onClick={onReanswer}>
+          Trả lời (soạn gợi ý)
+        </Button>
       )}
       {q.status === 'answered' && q.answer && <AnswerView answer={q.answer} big={big} onReanswer={onReanswer} />}
       {q.status === 'answered' && isQuickDraft && (

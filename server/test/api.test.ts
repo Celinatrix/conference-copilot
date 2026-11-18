@@ -70,6 +70,8 @@ class FakeDetector extends QuestionDetector {
         // "[garbled]" in the transcript stands in for a question the model judges unclear.
         is_clear: !input.current.includes('[garbled]'),
         unclear_reason: input.current.includes('[garbled]') ? 'Câu hỏi bị cắt giữa chừng.' : '',
+        // "[other team]" stands in for a question addressed to someone other than the listener's team.
+        for_presenting_team: !input.current.includes('[other team]'),
       },
       inputTokens: 10,
       outputTokens: 10,
@@ -117,6 +119,7 @@ function multipartFile(filename: string, content: Buffer) {
 const ORIGIN = 'http://localhost:3000';
 let db: Db;
 let app: FastifyInstance;
+let config: ReturnType<typeof loadConfig>;
 let baseUrl: string;
 const stt = new ScriptedStt();
 const translator = new EchoTranslator();
@@ -154,8 +157,9 @@ beforeAll(async () => {
   // Functional tests: open signup so each test user gets an isolated workspace (invite flow is in security.test.ts).
   // Both answer tiers priced alike here so the budget arithmetic below stays at $0.30 per answer.
   const { model: _m, ...qualityPrices } = defaults.answers;
-  const answers = { ...defaults.answers, autoBudgetUsd: 0.5, fast: { ...defaults.answers.fast, ...qualityPrices, model: 'fake-fast' } };
-  const config = loadConfig({ allowedOrigins: [ORIGIN], port: 0, allowSignup: true, registerPerHour: 1000, answers });
+  // Auto-drafting for the older tests; the confirm-first flow switches requireConfirm on for its own test.
+  const answers = { ...defaults.answers, autoBudgetUsd: 0.5, requireConfirm: false, fast: { ...defaults.answers.fast, ...qualityPrices, model: 'fake-fast' } };
+  config = loadConfig({ allowedOrigins: [ORIGIN], port: 0, allowSignup: true, registerPerHour: 1000, answers });
   await migrate(db, config.migrationsDir);
   ({ app } = await buildApp(db, config, {
     logger: false,
@@ -393,6 +397,78 @@ describe('conferences and live pipeline', () => {
     ws.send(JSON.stringify({ type: 'stop' }));
     await nextEvent(ws, 'state', (e) => e.status === 'idle');
     ws.close();
+  });
+
+  it('waits for "Trả lời" or "Skip" before drafting, and ignores questions for another team', async () => {
+    config.answers.requireConfirm = true;
+    try {
+      const cookie = await register('decide@example.com');
+      const id = (await app.inject({ method: 'POST', url: '/api/conferences', headers: { cookie }, payload: { name: 'Finals Q&A' } })).json().conference.id;
+      const { ticket } = (await app.inject({ method: 'POST', url: `/api/conferences/${id}/ws-ticket`, headers: { cookie } })).json();
+      const ws = new WebSocket(`ws://${baseUrl}/ws?ticket=${ticket}`, { origin: ORIGIN });
+      await nextEvent(ws, 'state');
+      ws.send(JSON.stringify({ type: 'start', audioSource: 'microphone', consent: true }));
+      await nextEvent(ws, 'state', (e) => e.status === 'live');
+      const ask = (text: string, at: number) =>
+        stt.handlers!.onResult({ isFinal: true, speechFinal: true, text, language: 'en', speaker: 'Judge', startSec: at, endSec: at + 2, confidence: 0.95 });
+
+      // Pending: shown to the listener, nothing drafted (no cost) until they choose.
+      const pending = nextEvent(ws, 'question', (e) => e.question.status === 'awaiting_click');
+      ask('Why did you choose a 60% quota share?', 0);
+      const q1 = (await pending).question;
+      expect(q1.answer).toBeNull();
+      expect(q1.seq).toBe(1);
+      expect((await app.inject({ url: `/api/conferences/${id}/questions`, headers: { cookie } })).json().spentUsd).toBe(0);
+
+      // "Trả lời" drafts it.
+      const answered = nextEvent(ws, 'question', (e) => e.question.id === q1.id && e.question.status === 'answered');
+      expect((await app.inject({ method: 'POST', url: `/api/questions/${q1.id}/answer`, headers: { cookie } })).statusCode).toBe(202);
+      await answered;
+
+      // A question for another team never reaches the listener; the next one for them does.
+      const next = nextEvent(ws, 'question', () => true);
+      ask('What is your view on that, [other team]?', 3);
+      ask('How do you price the rider?', 6);
+      // Numbers follow the order of asking; the ignored "[other team]" question takes none.
+      expect((await next).question).toMatchObject({ text_original: 'How do you price the rider?', seq: 2 });
+
+      // A pause mid-question: the fragment is detected first, then the full question. Only the full one stays.
+      const fragment = nextEvent(ws, 'question', (e) => e.question.text_original === 'What happens to your value of new business');
+      ask('What happens to your value of new business', 9);
+      const frag = (await fragment).question;
+      const fragmentDropped = nextEvent(ws, 'question', (e) => e.question.id === frag.id && e.question.status === 'dismissed');
+      ask('What happens to your value of new business if first-year lapse is higher than expected?', 11);
+      await fragmentDropped;
+      const pendingNow = (await app.inject({ url: `/api/conferences/${id}/questions`, headers: { cookie } }))
+        .json()
+        .questions.filter((q: { status: string }) => q.status === 'awaiting_click')
+        .map((q: { text_original: string }) => q.text_original);
+      expect(pendingNow).toContain('What happens to your value of new business if first-year lapse is higher than expected?');
+      expect(pendingNow).not.toContain('What happens to your value of new business');
+      // A complete question (ends with "?") is never dropped, even if a later detection repeats its text.
+      expect(pendingNow).toContain('How do you price the rider?');
+      const repeat = nextEvent(ws, 'question', (e) => e.question.text_original.startsWith('How do you price the rider? And'));
+      ask('How do you price the rider? And what about lapses?', 14);
+      await repeat;
+      const stillThere = (await app.inject({ url: `/api/conferences/${id}/questions`, headers: { cookie } }))
+        .json()
+        .questions.find((q: { text_original: string }) => q.text_original === 'How do you price the rider?');
+      expect(stillThere.status).toBe('awaiting_click');
+
+      // A complete question glued in front of an unfinished one: the next full question drops the glued fragment.
+      const glued = nextEvent(ws, 'question', (e) => e.question.text_original.endsWith('cost of the gift hour'));
+      ask('Why use the youngest child? And what is the cost of the gift hour', 17);
+      const gluedQ = (await glued).question;
+      const gluedDropped = nextEvent(ws, 'question', (e) => e.question.id === gluedQ.id && e.question.status === 'dismissed');
+      ask('And what is the cost of the gift hour per family?', 19);
+      await gluedDropped;
+
+      ws.send(JSON.stringify({ type: 'stop' }));
+      await nextEvent(ws, 'state', (e) => e.status === 'idle');
+      ws.close();
+    } finally {
+      config.answers.requireConfirm = false;
+    }
   });
 
   it('asks the listener to confirm unclear questions before drafting an answer', async () => {
