@@ -131,6 +131,17 @@ export function questionLabel(q: Pick<Question, 'seq'>): string {
   return q.seq ? `Câu ${q.seq}` : '';
 }
 
+/**
+ * Fills in "Câu N" for questions the server sent without a number (a server not yet migrated): numbered by the
+ * order they were asked, counting removed ones too so the numbers do not shift. Server numbers win when present.
+ */
+export function numberQuestions(list: Question[]): Question[] {
+  if (list.every((q) => q.seq)) return list;
+  const order = [...list].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  const fallback = new Map(order.map((q, i) => [q.id, i + 1]));
+  return list.map((q) => (q.seq ? q : { ...q, seq: fallback.get(q.id) ?? null }));
+}
+
 /** Short display name for the model that drafted an answer. */
 export function modelLabel(model: string | null): string {
   if (!model) return '';
