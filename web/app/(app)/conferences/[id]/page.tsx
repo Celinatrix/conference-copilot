@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { api, type Conference, type KbDocument, type Question, type Segment, type Usage } from '@/lib/api';
+import { api, numberQuestions, type Conference, type KbDocument, type Question, type Segment, type Usage } from '@/lib/api';
 import { AssistantPanel } from '@/components/live/AssistantPanel';
 import { ListenStream } from '@/components/live/ListenStream';
 import { AudioCapture, type AudioSource } from '@/lib/audio';
@@ -184,7 +184,7 @@ export default function LiveConferencePage() {
           // A newly detected question waiting for "Trả lời"/"Skip": ting (not on an iPhone that is recording, where
           // iOS would play it from the loudspeaker into the room).
           if (previous === undefined && isPendingDecision(q) && !speaker.recordingOnAppleMobile) playChime();
-          setQuestions((prev) => [q, ...prev.filter((x) => x.id !== q.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+          setQuestions((prev) => numberQuestions([q, ...prev.filter((x) => x.id !== q.id)].sort((a, b) => b.created_at.localeCompare(a.created_at))));
           // A fresh or repeated drafting run starts an empty preview; any other status ends it.
           setAnswerDrafts(({ [q.id]: _, ...rest }) => (q.status === 'answering' ? { ...rest, [q.id]: '' } : rest));
           break;
@@ -206,7 +206,7 @@ export default function LiveConferencePage() {
       .then((r) => {
         // Remember what is already answered so reloading the list never pops up old answers.
         for (const q of r.questions) questionStatusRef.current.set(q.id, q.status);
-        setQuestions(r.questions);
+        setQuestions(numberQuestions(r.questions));
       })
       .catch(() => {});
   }, [id]);
@@ -568,7 +568,7 @@ export default function LiveConferencePage() {
         }}
       />
       <AnswerReadyPopup
-        question={answerPopup}
+        question={answerPopup && (questions.find((x) => x.id === answerPopup.id) ?? answerPopup)}
         onClose={() => setAnswerPopup(null)}
         onOpen={(q) => {
           setAnswerPopup(null);
