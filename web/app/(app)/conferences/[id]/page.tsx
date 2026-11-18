@@ -76,6 +76,10 @@ export default function LiveConferencePage() {
   const [documents, setDocuments] = useState<KbDocument[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
+  // "Answer ready" popup: only for answers that finish while this page is open, not for history loaded on open.
+  const questionStatusRef = useRef(new Map<string, Question['status']>());
+  const [answerPopup, setAnswerPopup] = useState<Question | null>(null);
+  const [openRequest, setOpenRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [readAloud, setReadAloud] = useState(false);
   const readAloudRef = useRef(false);
   const view = useHiddenSegments(id);
@@ -164,6 +168,9 @@ export default function LiveConferencePage() {
           break;
         case 'question': {
           const q = e.question;
+          const previous = questionStatusRef.current.get(q.id);
+          questionStatusRef.current.set(q.id, q.status);
+          if (q.status === 'answered' && previous !== 'answered' && q.answer) setAnswerPopup(q);
           // Fresh "please confirm" questions are announced in the earphones; a correction re-emits without a reason.
           if (q.status === 'awaiting_confirm' && q.unclear_reason && readAloudRef.current) speaker.say('Câu hỏi chưa nghe rõ. Hãy xác nhận trên màn hình.');
           setQuestions((prev) => [q, ...prev.filter((x) => x.id !== q.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
@@ -184,7 +191,13 @@ export default function LiveConferencePage() {
   );
 
   const loadQuestions = useCallback(() => {
-    api<{ questions: Question[] }>(`/api/conferences/${id}/questions`).then((r) => setQuestions(r.questions)).catch(() => {});
+    api<{ questions: Question[] }>(`/api/conferences/${id}/questions`)
+      .then((r) => {
+        // Remember what is already answered so reloading the list never pops up old answers.
+        for (const q of r.questions) questionStatusRef.current.set(q.id, q.status);
+        setQuestions(r.questions);
+      })
+      .catch(() => {});
   }, [id]);
 
   const loadAll = useCallback(async () => {
@@ -516,6 +529,7 @@ export default function LiveConferencePage() {
                 segments={segments}
                 onConferenceChange={setConference}
                 toast={showToast}
+                openRequest={openRequest}
               />
             }
           />
@@ -524,6 +538,16 @@ export default function LiveConferencePage() {
 
       <StartDialog open={startOpen} onClose={() => setStartOpen(false)} onStart={startListening} />
       <ConferenceSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} conference={conference} onSaved={setConference} locked={status === 'live' || status === 'paused'} />
+      <AnswerReadyPopup
+        question={answerPopup}
+        onClose={() => setAnswerPopup(null)}
+        onOpen={(q) => {
+          setAnswerPopup(null);
+          setBigMode(false);
+          setTab('tools'); // phones show one column at a time: jump to the assistant
+          setOpenRequest({ id: q.id, nonce: Date.now() });
+        }}
+      />
       <AnimatePresence>
         {toast && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-line-strong bg-panel-2 px-4 py-2 text-sm shadow-xl">
@@ -540,6 +564,69 @@ function sttLabel(s: string) {
 }
 
 const RATES = [1, 1.15, 1.3, 1.5];
+const POPUP_MS = 5000;
+
+/**
+ * Centre-of-screen notice when a suggested answer is ready, so it is not missed while presenting or scrolling.
+ * Hides itself after 5 s; tapping it opens the answer in large print. A newer answer replaces the current one.
+ */
+function AnswerReadyPopup({ question, onClose, onOpen }: { question: Question | null; onClose: () => void; onOpen: (q: Question) => void }) {
+  // The page re-renders on every streamed translation word: keep the latest onClose in a ref so the 5 s timer
+  // restarts only for a new answer, not on each render (otherwise the popup would never hide while live).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!question) return;
+    const t = setTimeout(() => closeRef.current(), POPUP_MS);
+    return () => clearTimeout(t);
+  }, [question]);
+  const first = question?.answer?.options[0];
+  return (
+    <AnimatePresence>
+      {question && (
+        <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <motion.button
+            key={question.id + (question.answer_model ?? '')}
+            type="button"
+            onClick={() => onOpen(question)}
+            initial={{ opacity: 0, scale: 0.92 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+            className="pointer-events-auto relative w-full max-w-md overflow-hidden rounded-2xl border-2 border-ok/60 bg-panel p-4 text-left shadow-2xl"
+            role="alert"
+            aria-live="assertive"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-ok">💡 Đã có gợi ý trả lời</span>
+              <span
+                role="button"
+                aria-label="Đóng"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose();
+                }}
+                className="rounded-md px-1.5 text-lg leading-none text-muted hover:text-fg"
+              >
+                ×
+              </span>
+            </div>
+            <p className="mt-2 line-clamp-2 text-sm text-muted">❓ {question.text_vi || question.text_original}</p>
+            {first?.en && <p className="mt-2 line-clamp-4 text-[15px] leading-relaxed text-fg">{first.en}</p>}
+            <p className="mt-3 text-xs font-medium text-cyan">Chạm để xem đầy đủ (chữ lớn)</p>
+            {/* Countdown bar: shows how long until the popup hides itself. */}
+            <motion.span
+              className="absolute bottom-0 left-0 h-1 bg-ok/70"
+              initial={{ width: '100%' }}
+              animate={{ width: '0%' }}
+              transition={{ duration: POPUP_MS / 1000, ease: 'linear' }}
+            />
+          </motion.button>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 function ReadAloudControls({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   const [, rerender] = useState(0);

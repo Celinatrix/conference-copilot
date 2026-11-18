@@ -25,7 +25,7 @@ export interface AppConfig {
   port: number;
   host: string;
   /** Which proxies may set X-Forwarded-For. Never `true`: any client could then fake its IP. */
-  trustProxy: string | false;
+  trustProxy: string | number | false;
   allowedOrigins: string[];
   /** LAN mode (`--lan`): also accept the web app opened from a private-network address, e.g. a phone on the same Wi-Fi. */
   allowLanOrigins: boolean;
@@ -73,7 +73,13 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     port: num('PORT', 4000),
     host: process.argv.includes('--lan') ? '0.0.0.0' : process.env.HOST || '127.0.0.1',
     // Default: only the Next.js proxy on this machine is trusted.
-    trustProxy: process.env.TRUST_PROXY === 'false' ? false : process.env.TRUST_PROXY || 'loopback',
+    // A number = how many proxy hops to trust (cloud: browser → Vercel → Railway edge → app is 2); otherwise an IP list.
+    trustProxy:
+      process.env.TRUST_PROXY === 'false'
+        ? false
+        : /^\d+$/.test(process.env.TRUST_PROXY ?? '')
+          ? Number(process.env.TRUST_PROXY)
+          : process.env.TRUST_PROXY || 'loopback',
     allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
       .split(',')
       .map((s) => s.trim())

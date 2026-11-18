@@ -17,6 +17,8 @@ const lanHosts = [
 ];
 
 const nextConfig: NextConfig = {
+  // Lets a production build run beside the dev server without sharing .next (local check: NEXT_DIST_DIR=.next-build).
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   allowedDevOrigins: [...new Set(lanHosts)],
   // The browser only talks to this origin for REST, so the session cookie stays first-party.
   async rewrites() {
