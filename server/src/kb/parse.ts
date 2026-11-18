@@ -87,16 +87,59 @@ function decodeXml(s: string): string {
     .replace(/&amp;/g, '&');
 }
 
-async function parsePptx(buf: Buffer): Promise<ParsedDocument> {
-  const zip = await JSZip.loadAsync(buf);
-  const slideFiles = Object.keys(zip.files)
+/** Relationship id → target path (resolved against `baseDir`) from a .rels part, keeping only `typeSuffix` types. */
+async function readRels(zip: JSZip, relsPath: string, baseDir: string, typeSuffix: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const file = zip.file(relsPath);
+  if (!file) return out;
+  for (const tag of (await file.async('string')).match(/<Relationship\b[^>]*>/g) ?? []) {
+    const id = tag.match(/\bId="([^"]+)"/)?.[1];
+    const type = tag.match(/\bType="([^"]+)"/)?.[1];
+    const target = tag.match(/\bTarget="([^"]+)"/)?.[1];
+    if (!id || !target || !type?.endsWith(typeSuffix)) continue;
+    // Targets are relative ("slides/slide3.xml", "../notesSlides/notesSlide2.xml") or package-absolute ("/ppt/...").
+    const parts = target.startsWith('/') ? target.slice(1).split('/') : [...baseDir.split('/'), ...target.split('/')];
+    const resolved: string[] = [];
+    for (const p of parts) {
+      if (p === '..') resolved.pop();
+      else if (p && p !== '.') resolved.push(p);
+    }
+    out.set(id, resolved.join('/'));
+  }
+  return out;
+}
+
+/**
+ * Slides in presentation order. The slideN.xml file names follow creation order, so after slides are moved
+ * they no longer match what the presenter sees; presentation.xml holds the real order.
+ */
+async function orderedSlideFiles(zip: JSZip): Promise<string[]> {
+  const byName = Object.keys(zip.files)
     .filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))
     .sort((a, b) => Number(a.match(/(\d+)\.xml$/)![1]) - Number(b.match(/(\d+)\.xml$/)![1]));
+  const presentation = zip.file('ppt/presentation.xml');
+  if (!presentation) return byName;
+  const rels = await readRels(zip, 'ppt/_rels/presentation.xml.rels', 'ppt', '/slide');
+  const ordered = ((await presentation.async('string')).match(/<p:sldId\b[^>]*>/g) ?? [])
+    .map((tag) => rels.get(tag.match(/\br:id="([^"]+)"/)?.[1] ?? ''))
+    .filter((f): f is string => Boolean(f && zip.file(f)));
+  return ordered.length ? ordered : byName;
+}
+
+async function parsePptx(buf: Buffer): Promise<ParsedDocument> {
+  const zip = await JSZip.loadAsync(buf);
+  const slideFiles = await orderedSlideFiles(zip);
   const units: SourceUnit[] = [];
-  for (const file of slideFiles) {
-    const n = Number(file.match(/(\d+)\.xml$/)![1]);
+  for (const [index, file] of slideFiles.entries()) {
+    const n = index + 1;
     let text = xmlText(await zip.file(file)!.async('string'));
-    const notes = zip.file(`ppt/notesSlides/notesSlide${n}.xml`);
+    const fileName = file.split('/').pop()!;
+    // The slide's own relationships name its notes page. Only a slide with no relationships part at all (minimal
+    // generated files) falls back to the same-numbered notes file; real decks always have one.
+    const relsPath = `ppt/slides/_rels/${fileName}.rels`;
+    const noteRels = await readRels(zip, relsPath, 'ppt/slides', '/notesSlide');
+    const notesPath = zip.file(relsPath) ? [...noteRels.values()][0] : `ppt/notesSlides/notesSlide${fileName.match(/(\d+)\.xml$/)![1]}.xml`;
+    const notes = notesPath ? zip.file(notesPath) : null;
     if (notes) {
       const noteText = xmlText(await notes.async('string')).replace(/^\d+$/m, '').trim();
       if (noteText) text += `\n[Ghi chú người thuyết trình] ${noteText}`;

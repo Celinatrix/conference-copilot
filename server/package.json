@@ -10,7 +10,8 @@
     "test": "vitest run",
     "bench:fanout": "tsx scripts/bench-fanout.ts",
     "bench:live": "tsx scripts/bench-live.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:lan": "tsx watch src/index.ts --lan"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
@@ -23,6 +24,7 @@
     "exceljs": "^4.4.0",
     "fastify": "^5.12.8",
     "jszip": "^3.10.2",
+    "lamejs": "^1.2.1",
     "mammoth": "^1.13.0",
     "papaparse": "^5.7.0",
     "pg": "^8.23.1",

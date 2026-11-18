@@ -43,6 +43,8 @@ export interface LiveDeps {
   translator: Translator;
   /** Question detection + suggested answers; absent in setups without it. */
   questions?: QuestionService;
+  /** Spoken Vietnamese stream for locked-screen listening; absent in tests. */
+  audio?: { say(conferenceId: string, text: string | null): Promise<void> };
   log: { info(o: object, m?: string): void; warn(o: object, m?: string): void; error(o: object, m?: string): void };
 }
 
@@ -369,6 +371,7 @@ class LiveRoom {
         .translateSegment(segment, conference, context, receivedAt)
         .then((vi) => {
           entry.vi = vi;
+          void this.deps.audio?.say(conference.id, vi);
           // Fire-and-forget: question detection must never hold up the translation queue.
           void this.deps.questions?.onSegmentTranslated(segment, vi, conference, context.map((c) => c.original));
         })

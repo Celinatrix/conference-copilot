@@ -56,7 +56,60 @@ export interface Conference {
   created_at: string;
   updated_at: string;
   segment_count?: number;
+  response_modes?: ResponseMode[];
   permissions?: { canManage: boolean; canDelete: boolean };
+}
+
+export interface KbDocument {
+  id: string;
+  filename: string;
+  kind: 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'csv';
+  size_bytes: number;
+  status: 'processing' | 'ready' | 'error';
+  error: string | null;
+  unit_count: number;
+  char_count: number;
+  warning: string | null;
+  created_at: string;
+}
+
+export type ResponseMode = 'professional' | 'concise' | 'strategic' | 'academic' | 'technical';
+
+export const RESPONSE_MODE_LABELS: Record<ResponseMode, string> = {
+  concise: 'Ngắn gọn',
+  professional: 'Đầy đủ',
+  technical: 'Chuyên sâu',
+  strategic: 'Chiến lược',
+  academic: 'Học thuật',
+};
+
+export interface AnswerCitation {
+  chunk_id: string;
+  document_id: string;
+  filename: string;
+  locator: string;
+  quote: string;
+}
+
+export interface StructuredAnswer {
+  analysis_vi: string;
+  options: { mode: ResponseMode; vi: string; en: string; citations: AnswerCitation[] }[];
+  missing: string;
+  follow_ups: string[];
+  context: 'all' | 'ranked' | 'none' | 'no_match';
+}
+
+export interface Question {
+  id: string;
+  conference_id: string;
+  segment_id: string | null;
+  source: 'auto' | 'manual';
+  text_original: string;
+  text_vi: string | null;
+  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click';
+  error: string | null;
+  answer: StructuredAnswer | null;
+  created_at: string;
 }
 
 export interface Segment {

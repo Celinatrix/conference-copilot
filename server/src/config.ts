@@ -19,6 +19,10 @@ export interface AppConfig {
   /** Which proxies may set X-Forwarded-For. Never `true`: any client could then fake its IP. */
   trustProxy: string | false;
   allowedOrigins: string[];
+  /** LAN mode (`--lan`): also accept the web app opened from a private-network address, e.g. a phone on the same Wi-Fi. */
+  allowLanOrigins: boolean;
+  /** Spoken translation stream (Windows voices): voice language prefix and speaking rate. */
+  tts: { lang: string; rate: number };
   cookieSecure: boolean;
   /** Open self-registration. Off by default: after the first (owner) account, people join by invite link. */
   allowSignup: boolean;
@@ -57,13 +61,15 @@ export interface AppConfig {
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const base: AppConfig = {
     port: num('PORT', 4000),
-    host: process.env.HOST || '127.0.0.1',
+    host: process.argv.includes('--lan') ? '0.0.0.0' : process.env.HOST || '127.0.0.1',
     // Default: only the Next.js proxy on this machine is trusted.
     trustProxy: process.env.TRUST_PROXY === 'false' ? false : process.env.TRUST_PROXY || 'loopback',
     allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    allowLanOrigins: process.argv.includes('--lan'),
+    tts: { lang: process.env.TTS_LANG || 'vi', rate: num('TTS_RATE', 1.1) },
     cookieSecure: process.env.COOKIE_SECURE === 'true',
     allowSignup: process.env.ALLOW_SIGNUP === 'true',
     registerPerHour: num('REGISTER_PER_HOUR', 5),
@@ -100,4 +106,14 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     },
   };
   return { ...base, ...overrides };
+}
+
+/**
+ * Private IPv4 ranges (10/8, 172.16/12, 192.168/16) on the web app's port: a device on the same local network,
+ * over plain LAN mode (http, 3000) or secure LAN mode (https, 3443).
+ */
+const LAN_ORIGIN = /^(http:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}):3000|https:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}):3443)$/;
+
+export function isAllowedOrigin(config: Pick<AppConfig, 'allowedOrigins' | 'allowLanOrigins'>, origin: string): boolean {
+  return config.allowedOrigins.includes(origin) || (config.allowLanOrigins && LAN_ORIGIN.test(origin));
 }

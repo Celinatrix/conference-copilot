@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { api, type Conference, type Segment, type Usage } from '@/lib/api';
+import { api, type Conference, type KbDocument, type Question, type Segment, type Usage } from '@/lib/api';
+import { AssistantPanel } from '@/components/live/AssistantPanel';
+import { ListenStream } from '@/components/live/ListenStream';
 import { AudioCapture, type AudioSource } from '@/lib/audio';
 import { LiveSocket, type ConnectionState, type LiveEvent } from '@/lib/live';
 import { useSession } from '@/components/AppShell';
@@ -12,6 +14,7 @@ import { Badge, Button, Card, ErrorBanner, Spinner, StatusPill, inputClass } fro
 import { ConferenceSettingsDialog, JumpToLatest, LangBadge, StartDialog, elapsed, useAutoScroll } from '@/components/live/parts';
 import { OriginalRow, TranslationRow } from '@/components/live/rows';
 import { useFullscreen, useWakeLock } from '@/lib/screen';
+import { speaker } from '@/lib/tts';
 
 type RoomState = Extract<LiveEvent, { type: 'state' }>;
 type PartialLine = { text: string; language: string | null; speaker: string | null };
@@ -69,6 +72,11 @@ export default function LiveConferencePage() {
   const [bigMode, setBigMode] = useState(false);
   const [tab, setTab] = useState<Tab>('vi');
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<KbDocument[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
+  const [readAloud, setReadAloud] = useState(false);
+  const readAloudRef = useRef(false);
 
   const socketRef = useRef<LiveSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
@@ -134,10 +142,22 @@ export default function LiveConferencePage() {
           setSegments((prev) => prev.map((s) => (s.id === e.segmentId ? { ...s, text_vi: e.text_vi, translation_status: 'done', translation_error: null } : s)));
           setDrafts(({ [e.segmentId]: _, ...rest }) => rest);
           if (e.latencyMs !== null) setLatencies((l) => [...l.slice(-19), e.latencyMs!]);
+          // Only live translations are read; history and catch-up syncs arrive over REST and stay silent.
+          if (readAloudRef.current) speaker.say(e.text_vi);
           break;
         case 'translation.error':
           setSegments((prev) => prev.map((s) => (s.id === e.segmentId ? { ...s, translation_status: 'error', translation_error: e.message } : s)));
           setDrafts(({ [e.segmentId]: _, ...rest }) => rest);
+          break;
+        case 'question': {
+          const q = e.question;
+          setQuestions((prev) => [q, ...prev.filter((x) => x.id !== q.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+          // A fresh or repeated drafting run starts an empty preview; any other status ends it.
+          setAnswerDrafts(({ [q.id]: _, ...rest }) => (q.status === 'answering' ? { ...rest, [q.id]: '' } : rest));
+          break;
+        }
+        case 'answer.delta':
+          setAnswerDrafts((d) => ({ ...d, [e.questionId]: (d[e.questionId] ?? '') + e.delta }));
           break;
         case 'error':
           setNotice(e.message);
@@ -147,6 +167,10 @@ export default function LiveConferencePage() {
     },
     [stopCapture],
   );
+
+  const loadQuestions = useCallback(() => {
+    api<{ questions: Question[] }>(`/api/conferences/${id}/questions`).then((r) => setQuestions(r.questions)).catch(() => {});
+  }, [id]);
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
@@ -160,10 +184,12 @@ export default function LiveConferencePage() {
       historySeqRef.current = segs.at(-1)?.seq ?? 0;
       setSegments((prev) => mergeSegments(segs, prev));
       api<Usage>(`/api/conferences/${id}/usage`).then(setUsage).catch(() => {});
+      api<{ documents: KbDocument[] }>(`/api/conferences/${id}/documents`).then((r) => setDocuments(r.documents)).catch(() => {});
+      loadQuestions();
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Không tải được hội nghị');
     }
-  }, [id]);
+  }, [id, loadQuestions]);
 
   useEffect(() => {
     void loadAll();
@@ -180,6 +206,8 @@ export default function LiveConferencePage() {
               setSegments((prev) => mergeSegments(prev, r.segments));
             })
             .catch(() => {});
+          // Answers finished while offline arrive only through this reload.
+          loadQuestions();
         }
       } else if (detail) setNotice(detail);
     });
@@ -189,7 +217,7 @@ export default function LiveConferencePage() {
       socket.close();
       captureRef.current?.stop();
     };
-  }, [id, handleEvent, loadAll]);
+  }, [id, handleEvent, loadAll, loadQuestions]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -219,6 +247,8 @@ export default function LiveConferencePage() {
     capture.onChunk = (buf) => {
       if (sendingRef.current) socket.sendAudio(buf);
     };
+    capture.onMuted = (muted) =>
+      setNotice(muted ? 'Micro đang bị tắt tiếng (iPhone khóa màn hình hoặc chuyển sang app khác). Mở lại màn hình để tiếp tục thu âm.' : null);
     capture.onEnded = (reason) => {
       setNotice(`${reason} Phiên đã tạm dừng: chọn lại nguồn âm thanh để tiếp tục.`);
       socket.send({ type: 'pause' });
@@ -367,6 +397,26 @@ export default function LiveConferencePage() {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
           <ConnBadge conn={conn} />
+          <ReadAloudControls
+            on={readAloud}
+            onToggle={() => {
+              const next = !readAloud;
+              if (next) speaker.unlock();
+              else speaker.stop();
+              readAloudRef.current = next;
+              setReadAloud(next);
+            }}
+          />
+          <ListenStream
+            conferenceId={id}
+            title={conference.name}
+            onStart={() => {
+              // The stream already speaks every translation; in-page reading on top would double the voice.
+              speaker.stop();
+              readAloudRef.current = false;
+              setReadAloud(false);
+            }}
+          />
           {room && room.sttStatus !== 'idle' && <Badge tone={room.sttStatus === 'open' ? 'ok' : 'warn'}>STT: {sttLabel(room.sttStatus)}</Badge>}
           {someoneElseHosting && <Badge tone="cyan">Đang xem bản dịch trực tiếp từ thiết bị khác</Badge>}
           {status === 'paused' && !room?.hostConnected && <Badge tone="warn">Thiết bị thu âm mất kết nối</Badge>}
@@ -421,6 +471,19 @@ export default function LiveConferencePage() {
             avgLatency={avgLatency}
             usage={usage}
             onFocus={focusSegment}
+            assistant={
+              <AssistantPanel
+                conference={conference}
+                canManage={canManage}
+                documents={documents}
+                setDocuments={setDocuments}
+                questions={questions}
+                answerDrafts={answerDrafts}
+                segments={segments}
+                onConferenceChange={setConference}
+                toast={showToast}
+              />
+            }
           />
         )}
       </div>
@@ -440,6 +503,40 @@ export default function LiveConferencePage() {
 
 function sttLabel(s: string) {
   return ({ connecting: 'đang kết nối', open: 'đang nghe', reconnecting: 'đang kết nối lại', closed: 'đã đóng', failed: 'lỗi' } as Record<string, string>)[s] ?? s;
+}
+
+const RATES = [1, 1.15, 1.3, 1.5];
+
+function ReadAloudControls({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  const [, rerender] = useState(0);
+  const [rate, setRate] = usePersistentNumber('cc.ttsRate', 1.15);
+  useEffect(() => speaker.onVoicesChanged(() => rerender((n) => n + 1)), []);
+  useEffect(() => {
+    speaker.rate = rate;
+  }, [rate]);
+  if (!speaker.supported) return <Badge tone="warn">Trình duyệt này không đọc được thành tiếng</Badge>;
+  const voice = speaker.voice;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <button
+        onClick={onToggle}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${on ? 'border-ok/40 bg-ok/15 text-ok' : 'border-line-strong text-muted hover:text-fg'}`}
+        aria-pressed={on}
+      >
+        {on ? '🔊 Đang đọc tiếng Việt' : '🔈 Đọc tiếng Việt qua tai nghe'}
+      </button>
+      {on && (
+        <button
+          onClick={() => setRate(RATES[(RATES.indexOf(rate) + 1) % RATES.length] ?? 1.15)}
+          className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[11px] text-muted hover:text-fg"
+          title="Tốc độ đọc"
+        >
+          {rate}×
+        </button>
+      )}
+      {on && !voice && <Badge tone="warn">Máy chưa có giọng tiếng Việt: xem hướng dẫn cài trong README</Badge>}
+    </span>
+  );
 }
 
 function ConnBadge({ conn }: { conn: ConnectionState }) {
@@ -553,7 +650,7 @@ function TranslationColumn(props: {
   );
 }
 
-function ToolsColumn({ hidden, conferenceId, segments, avgLatency, usage, onFocus }: { hidden: boolean; conferenceId: string; segments: Segment[]; avgLatency: number | null; usage: Usage | null; onFocus: (id: string) => void }) {
+function ToolsColumn({ hidden, conferenceId, segments, avgLatency, usage, onFocus, assistant }: { hidden: boolean; conferenceId: string; segments: Segment[]; avgLatency: number | null; usage: Usage | null; onFocus: (id: string) => void; assistant: React.ReactNode }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<Segment[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -581,8 +678,10 @@ function ToolsColumn({ hidden, conferenceId, segments, avgLatency, usage, onFocu
 
   return (
     <aside className={`min-h-0 flex-col overflow-y-auto border-l border-line ${hidden ? 'hidden lg:flex' : 'flex'}`}>
-      <ColumnHeader title="Công cụ phiên" />
+      <ColumnHeader title="Trợ lý trả lời" />
       <div className="space-y-6 p-5">
+        {assistant}
+
         <div className="grid grid-cols-2 gap-2">
           <Stat label="Đoạn đã ghi" value={segments.length} />
           <Stat label="Đã dịch" value={`${translated}/${segments.length}`} />
@@ -629,13 +728,6 @@ function ToolsColumn({ hidden, conferenceId, segments, avgLatency, usage, onFocu
             </ul>
           )}
         </div>
-
-        <Card className="border-dashed p-4">
-          <div className="text-sm font-medium">AI Response Assistant</div>
-          <p className="mt-1 text-xs leading-relaxed text-faint">
-            Gợi ý câu trả lời dựa trên tài liệu (RAG) và phát hiện câu hỏi sẽ có ở vòng phát triển tiếp theo, sau khi có Knowledge Base. Hiện chưa có gì ở đây để tránh hiển thị chức năng chưa hoạt động.
-          </p>
-        </Card>
       </div>
     </aside>
   );
