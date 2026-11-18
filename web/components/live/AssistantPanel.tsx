@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ANSWER_MODELS,
   api,
@@ -40,6 +40,8 @@ export function AssistantPanel(props: {
   segments: Segment[];
   onConferenceChange: (c: Conference) => void;
   toast: (msg: string) => void;
+  /** Opens this question in the zoom dialog (from the "answer ready" popup); `nonce` re-opens the same one. */
+  openRequest?: { id: string; nonce: number } | null;
 }) {
   const { conference, canManage, documents, questions, answerDrafts, segments, toast } = props;
   const [uploading, setUploading] = useState<string | null>(null);
@@ -48,6 +50,9 @@ export function AssistantPanel(props: {
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [zoomId, setZoomId] = useState<string | null>(null);
+  useEffect(() => {
+    if (props.openRequest) setZoomId(props.openRequest.id);
+  }, [props.openRequest]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const modes = conference.response_modes?.length ? conference.response_modes : DEFAULT_MODES;
