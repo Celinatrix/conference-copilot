@@ -11,6 +11,14 @@
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "test": "npm test -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "dev:server:lan": "npm run dev:lan -w server",
+    "dev:web:lan": "npm run dev:lan -w web",
+    "dev:https": "node scripts/https-proxy.mjs"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

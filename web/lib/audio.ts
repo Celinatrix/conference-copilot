@@ -45,6 +45,8 @@ export class AudioCapture {
   onLevel: (rms: number) => void = () => {};
   /** Fired when the browser ends the capture (device unplugged, user stopped screen share). */
   onEnded: (reason: string) => void = () => {};
+  /** iPhone/iPad silence the microphone (without ending it) while the screen is locked or the tab is in the background. */
+  onMuted: (muted: boolean) => void = () => {};
 
   async start(source: AudioSource) {
     if (source.kind === 'system') {
@@ -72,6 +74,8 @@ export class AudioCapture {
       track.addEventListener('ended', () =>
         this.onEnded(source.kind === 'system' ? 'Đã dừng chia sẻ âm thanh hệ thống.' : 'Thiết bị thu âm đã bị ngắt kết nối.'),
       );
+      track.addEventListener('mute', () => this.onMuted(true));
+      track.addEventListener('unmute', () => this.onMuted(false));
     }
 
     this.ctx = new AudioContext();

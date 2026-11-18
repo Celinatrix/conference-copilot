@@ -4,7 +4,7 @@ import websocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
-import type { AppConfig } from './config.js';
+import { isAllowedOrigin, type AppConfig } from './config.js';
 import type { Db } from './db.js';
 import rateLimit from '@fastify/rate-limit';
 import { SESSION_COOKIE, WsTicketStore, requireUser, userFromToken } from './auth.js';
@@ -22,6 +22,9 @@ import { Responder } from './ai/responder.js';
 import { QuestionService } from './ai/service.js';
 import { documentRoutes } from './routes/documents.js';
 import { questionRoutes } from './routes/questions.js';
+import { listenRoutes } from './routes/listen.js';
+import { AudioService } from './tts/stream.js';
+import { WindowsTts } from './tts/windows.js';
 import { MAX_UPLOAD_BYTES } from './kb/parse.js';
 
 export interface AppContext {
@@ -32,6 +35,7 @@ export interface AppContext {
   stt: SttProvider;
   translator: Translator;
   questions: QuestionService;
+  audio: AudioService;
 }
 
 const MAX_AUDIO_FRAME_BYTES = 64 * 1024;
@@ -52,7 +56,9 @@ export async function buildApp(
 
   const stt = opts.stt ?? new DeepgramProvider(config.deepgram.apiKey, config.deepgram.model);
   const translator = opts.translator ?? new Translator(config.anthropic.apiKey, config.anthropic.translationModel);
-  const live = new LiveManager({ db, config, stt, translator, log: app.log });
+  const audio = new AudioService(new WindowsTts(config.tts.lang, config.tts.rate, app.log), app.log);
+  app.addHook('onClose', async () => audio.tts.stop());
+  const live = new LiveManager({ db, config, stt, translator, audio, log: app.log });
   const questions = new QuestionService({
     db,
     config,
@@ -62,7 +68,7 @@ export async function buildApp(
     log: app.log,
   });
   live.attachQuestions(questions);
-  const ctx: AppContext = { db, config, live, tickets: new WsTicketStore(), stt, translator, questions };
+  const ctx: AppContext = { db, config, live, tickets: new WsTicketStore(), stt, translator, questions, audio };
 
   app.decorateRequest('user', null);
   app.addHook('onRequest', async (req, reply) => {
@@ -71,7 +77,7 @@ export async function buildApp(
     const origin = req.headers.origin;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       const hasSession = Boolean(req.cookies[SESSION_COOKIE]);
-      if ((origin && !config.allowedOrigins.includes(origin)) || (!origin && hasSession)) {
+      if ((origin && !isAllowedOrigin(config, origin)) || (!origin && hasSession)) {
         return reply.code(403).send({ error: 'bad_origin', message: 'Origin không được phép.' });
       }
     }
@@ -114,11 +120,12 @@ export async function buildApp(
   await app.register(async (scope) => conferenceRoutes(scope, ctx));
   await app.register(async (scope) => documentRoutes(scope, ctx));
   await app.register(async (scope) => questionRoutes(scope, ctx));
+  await app.register(async (scope) => listenRoutes(scope, ctx));
   await app.register(async (scope) => workspaceRoutes(scope, ctx));
 
   app.get('/ws', { websocket: true }, async (socket, req) => {
     const origin = req.headers.origin;
-    if (origin && !config.allowedOrigins.includes(origin)) {
+    if (origin && !isAllowedOrigin(config, origin)) {
       socket.close(4403, 'bad origin');
       return;
     }

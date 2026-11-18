@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Segment } from './api';
+import type { Question, Segment } from './api';
 
 export type LiveEvent =
   | {
@@ -21,6 +21,8 @@ export type LiveEvent =
   | { type: 'translation.delta'; segmentId: string; delta: string }
   | { type: 'translation.done'; segmentId: string; text_vi: string; latencyMs: number | null }
   | { type: 'translation.error'; segmentId: string; message: string }
+  | { type: 'question'; question: Question }
+  | { type: 'answer.delta'; questionId: string; delta: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'pong'; t: number };
 
@@ -33,7 +35,9 @@ function wsBase() {
   const configured = process.env.NEXT_PUBLIC_WS_URL;
   if (configured) return configured;
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.hostname}:4000`;
+  // Secure LAN mode (npm run dev:https) serves the app on 3443 and the API/WebSocket on 4443.
+  const port = window.location.protocol === 'https:' && window.location.port === '3443' ? 4443 : 4000;
+  return `${proto}://${window.location.hostname}:${port}`;
 }
 
 /**

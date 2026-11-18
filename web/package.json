@@ -6,7 +6,8 @@
     "dev": "next dev -H 127.0.0.1 -p 3000",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3000",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:lan": "next dev -H 0.0.0.0 -p 3000"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.5",

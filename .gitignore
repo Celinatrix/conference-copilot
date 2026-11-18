@@ -5,3 +5,4 @@ data/
 next-env.d.ts
 *.tsbuildinfo
 coverage/
+certs/

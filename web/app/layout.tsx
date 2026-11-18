@@ -8,6 +8,7 @@ const code = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'], variab
 export const metadata: Metadata = {
   title: 'Conference AI Copilot',
   description: 'Dịch hội nghị đa ngôn ngữ sang tiếng Việt theo thời gian thực',
+  appleWebApp: { capable: true, title: 'Copilot', statusBarStyle: 'black-translucent' },
 };
 
 export const viewport: Viewport = { themeColor: '#05080f', width: 'device-width', initialScale: 1 };

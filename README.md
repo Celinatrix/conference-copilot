@@ -48,10 +48,12 @@ dịch sang **tiếng Việt** sau khoảng 1–2 giây, lưu toàn bộ transcr
 | Nhiều người cùng xem một phiên | ✅ Hoạt động | Đo được dưới 8 ms để đẩy tới 20 người (phần server) |
 | Tự kết nối lại khi rớt mạng, giữ 2 phút âm thanh | ✅ Có code, ⚠️ chưa thử rớt mạng thật | |
 | Chế độ chữ lớn, toàn màn hình, giữ màn hình sáng | ✅ Hoạt động | |
-| Knowledge Base: upload PDF, DOCX, PPTX, XLSX, CSV | ✅ Backend (API + test), ❌ chưa có giao diện upload | |
-| Phát hiện câu hỏi + gợi ý trả lời có trích dẫn tài liệu | ✅ Backend (API + test), ❌ chưa có giao diện | 3 kiểu trả lời, tiếng Việt + tiếng Anh |
+| Knowledge Base: upload PDF, DOCX, PPTX, XLSX, CSV | ✅ Hoạt động | Cột "Trợ lý trả lời" |
+| Phát hiện câu hoặc gõ câu hỏi + gợi ý trả lời có trích dẫn tài liệu | ✅ Có giao diện, ⚠️ chưa chạy với API thật | Tối đa 3 kiểu trả lời, tiếng Việt + tiếng Anh |
 | Theo dõi chi phí, trần chi phí cứng | ✅ Hoạt động | |
-| Giọng đọc bản dịch, chặn im lặng (VAD), thanh điều khiển cho điện thoại | ❌ Chưa làm | Đã lên kế hoạch |
+| Đọc bản dịch tiếng Việt thành tiếng (qua tai nghe) | ✅ Có code, ⚠️ chưa thử trên điện thoại thật | Trong trình duyệt, hoặc luồng MP3 từ giọng Windows (nghe được khi khóa màn hình) |
+| Mở app trên điện thoại cùng mạng (chế độ LAN) | ✅ Hoạt động | `npm run dev:server:lan` + `npm run dev:web:lan` |
+| Chặn im lặng (VAD) | ❌ Chưa làm | |
 | Báo cáo tổng hợp sau hội nghị | ❌ Chưa làm | |
 
 ---
@@ -216,6 +218,53 @@ Kiểm tra micro trước buổi họp ở **Cài đặt → Kiểm tra micro**.
   trực tiếp. Mỗi lúc chỉ một thiết bị được thu âm.
 
 ---
+
+## Nghe bản dịch qua tai nghe trên iPhone (kể cả khi tắt màn hình)
+
+Laptop thu âm giọng diễn giả, dịch, rồi **tự đọc bản dịch tiếng Việt thành một luồng âm thanh** (như đài radio online). iPhone phát luồng đó như phát nhạc nên **khóa màn hình vẫn nghe được**.
+
+### Cách A: laptop thu âm, iPhone nghe (khóa màn hình vẫn nghe được)
+
+#### Chuẩn bị một lần trên laptop
+1. **Giọng đọc tiếng Việt cho Windows:** Settings → Time & Language → Speech → *Manage voices* → **Add voices** → chọn **Vietnamese** → Add. Chờ tải xong (giọng "Microsoft An"). Sau đó khởi động lại server.
+2. **Nhận iPhone qua dây USB:** cài **Apple Devices** (Microsoft Store) hoặc **iTunes**. Cắm iPhone, bấm "Tin cậy máy tính này" trên iPhone.
+
+#### Mỗi lần dùng
+1. iPhone: Cài đặt → **Điểm truy cập cá nhân** → bật **Cho phép người khác kết nối**. Cắm dây vào laptop; laptop sẽ có mạng qua iPhone.
+2. Laptop chạy chế độ LAN:
+   ```bash
+   npm run dev:server:lan
+   npm run dev:web:lan
+   ```
+3. Laptop: `ipconfig` → tìm **IPv4 Address** của kết nối "Apple Mobile Device Ethernet" (thường là `172.20.10.x`).
+4. iPhone mở **Safari** → `http://172.20.10.x:3000` → đăng nhập → mở hội nghị.
+   *Tùy chọn:* nút Chia sẻ → **Thêm vào MH chính** để có biểu tượng app "Copilot".
+5. Cắm tai nghe vào iPhone, bấm **🎧 Nghe khi tắt màn hình**, rồi **Thử tiếng** để nghe câu thử.
+6. Laptop bấm **Start Listening**. Giờ có thể khóa màn hình iPhone.
+
+Lưu ý:
+- Nếu khi khóa màn hình mà âm thanh dừng trong **app ở màn hình chính**, hãy dùng **tab Safari** thay vì app: iOS xử lý âm thanh nền của tab Safari ổn định hơn.
+- Âm thanh trễ hơn chữ trên màn hình vài giây (dịch + đọc + bộ đệm của iPhone). Nếu đọc chậm hơn diễn giả quá 15 giây, các câu cũ bị bỏ để luôn đọc câu mới nhất.
+- Tốc độ đọc: `TTS_RATE` trong `.env` (mặc định 1.1), khởi động lại server để áp dụng.
+- Nút **🔈 Đọc tiếng Việt qua tai nghe** (đọc ngay trong trình duyệt) vẫn còn, nhưng chỉ chạy khi màn hình sáng.
+- Chế độ LAN mở app cho mọi máy cùng mạng (vẫn phải đăng nhập). Dùng xong thì quay lại `npm run dev:server` / `npm run dev:web`.
+
+### Cách B: iPhone tự thu âm qua micro tai nghe (màn hình phải sáng)
+
+Safari chỉ cho dùng micro trên trang **HTTPS**, và **tắt micro khi khóa màn hình**. Vì vậy ở cách này màn hình iPhone phải sáng (giảm độ sáng xuống thấp nhất; app tự giữ màn hình không tắt). Muốn khóa màn hình thì dùng Cách A ở trên (laptop thu âm).
+
+1. Kết nối iPhone với laptop như Cách A (USB + Điểm truy cập cá nhân), chạy `npm run dev:server:lan` và `npm run dev:web:lan`.
+2. Chạy thêm (cửa sổ terminal thứ ba):
+   ```bash
+   npm run dev:https
+   ```
+   Lần đầu, script tự tạo chứng chỉ trong thư mục `certs/` (đã có trong `.gitignore`; **không gửi `certs/ca.key` cho ai**). Script in ra hai địa chỉ.
+3. **Một lần duy nhất trên iPhone:** mở Safari tới `http://<IP-laptop>:3080` → **Tải chứng chỉ** → Cài đặt → **Đã tải về hồ sơ** → Cài đặt → rồi **Cài đặt chung → Giới thiệu → Cài đặt tin cậy chứng nhận** → bật **Conference Copilot Local CA**.
+4. Mở Safari tới `https://<IP-laptop>:3443`, đăng nhập, mở hội nghị.
+5. Cắm tai nghe có micro vào iPhone. Bấm **🔈 Đọc tiếng Việt qua tai nghe**, rồi **Start Listening** → chọn micro tai nghe → cho phép micro.
+6. Bản gốc và bản dịch hiện trên iPhone, đồng thời lưu lại; xem đầy đủ trên laptop (`http://localhost:3000`) bất cứ lúc nào.
+
+Nếu lỡ khóa màn hình, app báo "Micro đang bị tắt tiếng"; mở lại màn hình là thu tiếp. Micro tai nghe nằm sát miệng bạn nên thu giọng người khác trong phòng kém hơn micro laptop: hãy thử trước.
 
 ## Cấu hình (.env)
 
