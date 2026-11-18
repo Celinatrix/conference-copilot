@@ -48,7 +48,8 @@ export async function buildApp(
   const app = Fastify({
     logger: opts.logger === false ? false : { level: process.env.LOG_LEVEL || 'info' },
     bodyLimit: 256 * 1024,
-    trustProxy: config.trustProxy,
+    // Fastify's overloads only accept each form separately (string | number | boolean), not their union.
+    trustProxy: config.trustProxy as string,
   });
   await app.register(cookie);
   await app.register(websocket, { options: { maxPayload: MAX_AUDIO_FRAME_BYTES } });
