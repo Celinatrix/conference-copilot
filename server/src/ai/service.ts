@@ -27,6 +27,8 @@ export interface QuestionDto {
   error: string | null;
   /** Why the listener is asked to confirm the question (status 'awaiting_confirm'). */
   unclear_reason: string | null;
+  /** "Câu N" in the conference, in the order questions were asked. */
+  seq: number;
   answer: StructuredAnswer | null;
   answer_model: string | null;
   answer_cost_usd: number | null;
@@ -61,6 +63,9 @@ export interface QuestionDeps {
   announce?: (conferenceId: string, text: string) => void;
   log: { warn(o: object, m?: string): void; error(o: object, m?: string): void };
 }
+
+/** "Câu N": the next number in the conference ($1). Removed questions keep theirs, so numbers never shift. */
+const NEXT_QUESTION_SEQ = `(SELECT COALESCE(MAX(seq), 0) + 1 FROM questions WHERE conference_id = $1)`;
 
 /** Answers waiting per conference beyond which new manual requests are refused. */
 export const MAX_QUEUED_ANSWERS = 5;
@@ -112,7 +117,8 @@ export class QuestionService {
         unit: 'token',
         costUsd: tokenCost(inputTokens, outputTokens, config.anthropic.inputUsdPerMTok, config.anthropic.outputUsdPerMTok),
       });
-      if (!detection.is_question || !detection.worth_answering) return;
+      // Only questions put to the listener's team (by judges / organizers / audience) are surfaced.
+      if (!detection.is_question || !detection.worth_answering || !detection.for_presenting_team) return;
 
       // A question heard badly is confirmed by the listener first: an answer to the wrong question is worse than none.
       const lowConfidence = segment.confidence !== null && segment.confidence < config.lowConfidenceThreshold;
@@ -123,15 +129,17 @@ export class QuestionService {
       const unclear = reasons.length > 0;
       const budget = config.answers.autoBudgetUsd;
       const overBudget = !unclear && budget > 0 && (await this.spentOnAnswers(conference.id)) >= budget;
-      const status = unclear ? 'awaiting_confirm' : overBudget ? 'awaiting_click' : 'detected';
+      // By default every question waits for the listener's "Trả lời" (draft) or "Skip" before anything is drafted:
+      // nothing is spent on questions they will not answer. ANSWER_REQUIRE_CONFIRM=false restores auto-drafting.
+      const status = unclear ? 'awaiting_confirm' : config.answers.requireConfirm || overBudget ? 'awaiting_click' : 'detected';
       const [row] = await db.query(
-        `INSERT INTO questions (conference_id, segment_id, source, text_original, text_vi, language, status, unclear_reason)
-         VALUES ($1, $2, 'auto', $3, $4, $5, $6, $7) RETURNING *`,
+        `INSERT INTO questions (conference_id, segment_id, source, text_original, text_vi, language, status, unclear_reason, seq)
+         VALUES ($1, $2, 'auto', $3, $4, $5, $6, $7, ${NEXT_QUESTION_SEQ}) RETURNING *`,
         [conference.id, segment.id, detection.question || segment.text_original, detection.question_vi || vi, segment.language, status, unclear ? reasons.join(' ') : null],
       );
       const question = toQuestionDto(row);
+      await this.dropSupersededFragments(conference.id, question);
       this.emit(question);
-      if (unclear) this.deps.announce?.(conference.id, 'Câu hỏi chưa nghe rõ. Hãy xác nhận trên màn hình.');
       if (status === 'detected') await this.answer(question.id, conference, detection.keywords);
     } catch (err) {
       this.deps.log.warn({ err, segmentId: segment.id }, 'question detection failed');
@@ -140,13 +148,42 @@ export class QuestionService {
 
   async createManual(conference: ConferenceRow, text: string, segmentId: string | null, textVi: string | null, language: string | null): Promise<QuestionDto> {
     const [row] = await this.deps.db.query(
-      `INSERT INTO questions (conference_id, segment_id, source, text_original, text_vi, language, status)
-       VALUES ($1, $2, 'manual', $3, $4, $5, 'detected') RETURNING *`,
+      `INSERT INTO questions (conference_id, segment_id, source, text_original, text_vi, language, status, seq)
+       VALUES ($1, $2, 'manual', $3, $4, $5, 'detected', ${NEXT_QUESTION_SEQ}) RETURNING *`,
       [conference.id, segmentId, text, textVi, language],
     );
     const question = toQuestionDto(row);
     this.emit(question);
     return question;
+  }
+
+  /**
+   * A speaker who pauses mid-question produces two detections: the fragment ("What happens to your value of new
+   * business") and, a moment later, the full question. Undecided fragments from the last 30 s that the new question
+   * contains are dismissed, so the listener gets one prompt per question.
+   */
+  private async dropSupersededFragments(conferenceId: string, question: QuestionDto) {
+    const norm = (s: string) => s.toLowerCase().normalize('NFC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const full = norm(question.text_original);
+    if (!full) return;
+    const recent = await this.deps.db.query(
+      `SELECT * FROM questions WHERE conference_id = $1 AND id <> $2 AND status IN ('awaiting_click', 'awaiting_confirm')
+         AND created_at > now() - interval '30 seconds'`,
+      [conferenceId, question.id],
+    );
+    for (const old of recent) {
+      // Only an unfinished question counts as a fragment: one flagged unclear, or not ending with a question mark.
+      // A complete question is never dropped, even when a later (wrongly merged) detection repeats its text.
+      const unfinished = old.status === 'awaiting_confirm' || !/[?？]\s*["')\]]?\s*$/u.test(String(old.text_original));
+      if (!unfinished) continue;
+      // Compare the unfinished tail: a detection can wrongly glue an earlier complete question in front of the
+      // fragment ("…claims data? What happens to your value of new business if"); its tail is what continues.
+      const parts = String(old.text_original).split(/[?？.!。]/u).map((p) => p.trim()).filter(Boolean);
+      const fragment = norm(parts.at(-1) ?? '');
+      if (!fragment || fragment.length >= full.length || !full.includes(fragment)) continue;
+      const q = await this.dismiss(old.id);
+      if (q) this.deps.log.warn({ questionId: old.id }, 'dismissed a question fragment superseded by the full question');
+    }
   }
 
   /** Prices from .env for the two configured models, list prices for the other selectable ones. */

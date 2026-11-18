@@ -16,6 +16,7 @@ import { OriginalRow, TranslationRow } from '@/components/live/rows';
 import { useFullscreen, useWakeLock } from '@/lib/screen';
 import { isAppleMobile, speaker } from '@/lib/tts';
 import { useHiddenSegments } from '@/lib/hidden-segments';
+import { playChime, primeChime } from '@/lib/chime';
 
 type RoomState = Extract<LiveEvent, { type: 'state' }>;
 type PartialLine = { text: string; language: string | null; speaker: string | null };
@@ -79,6 +80,16 @@ export default function LiveConferencePage() {
   const questionStatusRef = useRef(new Map<string, Question['status']>());
   const [answerPopup, setAnswerPopup] = useState<Question | null>(null);
   const [openRequest, setOpenRequest] = useState<{ id: string; nonce: number } | null>(null);
+  // Questions waiting for "Trả lời"/"Skip": the oldest recent one is shown in a popup that stays until answered.
+  const [decided, setDecided] = useState<Set<string>>(() => new Set());
+  const pendingDecisions = useMemo(
+    () =>
+      questions
+        .filter((q) => isPendingDecision(q) && !decided.has(q.id) && Date.now() - Date.parse(q.created_at) < DECISION_WINDOW_MS)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    [questions, decided],
+  );
+  useEffect(() => primeChime(), []);
   const [readAloud, setReadAloud] = useState(false);
   const readAloudRef = useRef(false);
   const view = useHiddenSegments(id);
@@ -170,8 +181,9 @@ export default function LiveConferencePage() {
           const previous = questionStatusRef.current.get(q.id);
           questionStatusRef.current.set(q.id, q.status);
           if (q.status === 'answered' && previous !== 'answered' && q.answer) setAnswerPopup(q);
-          // Fresh "please confirm" questions are announced in the earphones; a correction re-emits without a reason.
-          if (q.status === 'awaiting_confirm' && q.unclear_reason && readAloudRef.current) speaker.say('Câu hỏi chưa nghe rõ. Hãy xác nhận trên màn hình.');
+          // A newly detected question waiting for "Trả lời"/"Skip": ting (not on an iPhone that is recording, where
+          // iOS would play it from the loudspeaker into the room).
+          if (previous === undefined && isPendingDecision(q) && !speaker.recordingOnAppleMobile) playChime();
           setQuestions((prev) => [q, ...prev.filter((x) => x.id !== q.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
           // A fresh or repeated drafting run starts an empty preview; any other status ends it.
           setAnswerDrafts(({ [q.id]: _, ...rest }) => (q.status === 'answering' ? { ...rest, [q.id]: '' } : rest));
@@ -532,6 +544,29 @@ export default function LiveConferencePage() {
 
       <StartDialog open={startOpen} onClose={() => setStartOpen(false)} onStart={startListening} />
       <ConferenceSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} conference={conference} onSaved={setConference} locked={status === 'live' || status === 'paused'} />
+      <QuestionDecisionPopup
+        question={pendingDecisions[0] ?? null}
+        remaining={Math.max(0, pendingDecisions.length - 1)}
+        onDecide={async (q, choice) => {
+          // Hide at once on this device; the server's update closes it on every other device.
+          setDecided((d) => new Set(d).add(q.id));
+          if (choice === 'edit') {
+            setBigMode(false);
+            setTab('tools');
+            return;
+          }
+          try {
+            await api(`/api/questions/${q.id}/${choice === 'answer' ? 'answer' : 'dismiss'}`, { method: 'POST' });
+          } catch (err) {
+            setDecided((d) => {
+              const next = new Set(d);
+              next.delete(q.id);
+              return next;
+            });
+            showToast(err instanceof Error ? err.message : 'Không gửi được, thử lại');
+          }
+        }}
+      />
       <AnswerReadyPopup
         question={answerPopup}
         onClose={() => setAnswerPopup(null)}
@@ -559,6 +594,80 @@ function sttLabel(s: string) {
 
 const RATES = [1, 1.15, 1.3, 1.5];
 const POPUP_MS = 5000;
+/** Older undecided questions (e.g. from an earlier session) do not pop up when the page is opened. */
+const DECISION_WINDOW_MS = 15 * 60 * 1000;
+
+/** Detected and waiting for the listener: "Trả lời" (draft an answer) or "Skip". */
+function isPendingDecision(q: Question) {
+  return q.status === 'awaiting_click' || q.status === 'awaiting_confirm';
+}
+
+/**
+ * Centre-screen prompt for a newly detected question from the judges / organisers. It does not hide by itself and
+ * ignores taps outside: it closes only when the listener chooses "Trả lời" or "Skip" (on any device).
+ */
+function QuestionDecisionPopup({
+  question,
+  remaining,
+  onDecide,
+}: {
+  question: Question | null;
+  remaining: number;
+  onDecide: (q: Question, choice: 'answer' | 'skip' | 'edit') => void;
+}) {
+  const unclear = question?.status === 'awaiting_confirm';
+  return (
+    <AnimatePresence>
+      {question && (
+        <motion.div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/70 p-4 backdrop-blur-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            key={question.id}
+            role="alertdialog"
+            aria-modal
+            aria-labelledby="decision-title"
+            initial={{ opacity: 0, scale: 0.92, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+            className={`w-full max-w-md rounded-2xl border-2 bg-panel p-5 shadow-2xl ${unclear ? 'border-warn/70' : 'border-electric/70'}`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 id="decision-title" className={`text-base font-semibold ${unclear ? 'text-warn' : 'text-electric'}`}>
+                {unclear ? '⚠' : '🔔'} {question.seq ? `Câu ${question.seq} · ` : ''}
+                {unclear ? 'Câu hỏi mới (nghe chưa rõ)' : 'Câu hỏi mới từ BTC'}
+              </h2>
+              {remaining > 0 && <span className="rounded-full bg-panel-2 px-2 py-0.5 text-[11px] text-muted">+{remaining} câu chờ</span>}
+            </div>
+            <p className="mt-3 text-lg leading-snug text-fg">{question.text_vi || question.text_original}</p>
+            {question.text_vi && question.text_vi !== question.text_original && (
+              <p className="mt-1.5 text-sm leading-relaxed text-muted">{question.text_original}</p>
+            )}
+            {unclear && question.unclear_reason && <p className="mt-2 text-xs text-warn">{question.unclear_reason}</p>}
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <Button variant="primary" className="py-3 text-base" onClick={() => onDecide(question, 'answer')}>
+                Trả lời
+              </Button>
+              <Button className="py-3 text-base" onClick={() => onDecide(question, 'skip')}>
+                Skip
+              </Button>
+            </div>
+            {unclear && (
+              <button onClick={() => onDecide(question, 'edit')} className="mt-3 w-full text-center text-xs text-muted underline-offset-2 hover:text-fg hover:underline">
+                Sửa lại câu hỏi trước khi trả lời
+              </button>
+            )}
+            <p className="mt-3 text-center text-[11px] text-faint">“Trả lời” soạn gợi ý từ tài liệu của bạn · “Skip” bỏ qua câu này</p>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 /**
  * Centre-of-screen notice when a suggested answer is ready, so it is not missed while presenting or scrolling.
@@ -592,7 +701,7 @@ function AnswerReadyPopup({ question, onClose, onOpen }: { question: Question | 
             aria-live="assertive"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-ok">💡 Đã có gợi ý trả lời</span>
+              <span className="text-sm font-semibold text-ok">💡 {question.seq ? `Câu ${question.seq} · ` : ''}Đã có gợi ý trả lời</span>
               <span
                 role="button"
                 aria-label="Đóng"
