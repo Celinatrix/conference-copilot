@@ -63,6 +63,7 @@ export class AudioCapture {
         audio: {
           deviceId: source.deviceId ? { exact: source.deviceId } : undefined,
           channelCount: 1,
+          // Tried on iPhone: echo cancellation (voice-chat mode) ducks the 🎧 playback to silence, so it stays off.
           echoCancellation: false,
           noiseSuppression: true,
           autoGainControl: true,

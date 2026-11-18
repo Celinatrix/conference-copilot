@@ -22,7 +22,8 @@ function Wait-WinRt($operation, [Type]$resultType) {
 }
 
 $all = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices
-$voice = $all | Where-Object { $_.Language -like "$Lang*" } | Select-Object -First 1
+# Female voices only (e.g. "Microsoft An"): the app reads translations in one female voice on every device.
+$voice = $all | Where-Object { $_.Language -like "$Lang*" -and $_.Gender -eq [Windows.Media.SpeechSynthesis.VoiceGender]::Female } | Select-Object -First 1
 if (-not $voice) {
   [Console]::Out.WriteLine('NOVOICE ' + (& $b64 (($all | ForEach-Object { "$($_.DisplayName) ($($_.Language))" }) -join ', ')))
   exit 0

@@ -26,6 +26,12 @@ export const DetectionSchema = z.object({
   question: z.string().describe('The complete question in its original language, merged with the previous lines if it started there.'),
   question_vi: z.string().describe('The question translated into natural Vietnamese.'),
   keywords: z.array(z.string()).describe('5-12 search keywords in BOTH the original language and Vietnamese for finding relevant documents.'),
+  is_clear: z
+    .boolean()
+    .describe(
+      'False when the transcribed question looks garbled, cut off, mis-recognised or ambiguous enough that the listener should confirm what was actually asked before an answer is drafted.',
+    ),
+  unclear_reason: z.string().describe('When is_clear is false: a short Vietnamese explanation of what is unclear. Otherwise an empty string.'),
 });
 export type Detection = z.infer<typeof DetectionSchema>;
 

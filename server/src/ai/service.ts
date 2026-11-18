@@ -5,7 +5,14 @@ import type { ServerEvent, SegmentDto } from '../live/protocol.js';
 import { recordUsage, tokenCost } from '../usage.js';
 import { selectContext } from '../kb/retrieve.js';
 import { looksLikeQuestion, type QuestionDetector } from './questions.js';
-import { RESPONSE_MODE_KEYS, type Responder, type ResponseMode, type StructuredAnswer } from './responder.js';
+import {
+  ANSWER_MODEL_CHOICES,
+  RESPONSE_MODE_KEYS,
+  type AnswerModelChoice,
+  type Responder,
+  type ResponseMode,
+  type StructuredAnswer,
+} from './responder.js';
 import { CostGuard } from './budget.js';
 
 export interface QuestionDto {
@@ -16,8 +23,10 @@ export interface QuestionDto {
   text_original: string;
   text_vi: string | null;
   language: string | null;
-  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click';
+  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click' | 'awaiting_confirm' | 'dismissed';
   error: string | null;
+  /** Why the listener is asked to confirm the question (status 'awaiting_confirm'). */
+  unclear_reason: string | null;
   answer: StructuredAnswer | null;
   answer_model: string | null;
   answer_cost_usd: number | null;
@@ -38,12 +47,18 @@ export function normalizeModes(value: unknown): ResponseMode[] {
   return modes.length ? modes.slice(0, 3) : ['professional', 'concise', 'strategic'];
 }
 
+/** 'fast' = cheap first draft; 'quality' = the stronger model, on request. */
+export type AnswerTier = 'fast' | 'quality';
+
 export interface QuestionDeps {
   db: Db;
   config: AppConfig;
   detector: QuestionDetector;
-  responder: Responder;
+  /** The responder for a model id (first drafts use the conference's choice, "draft more carefully" ANSWER_MODEL). */
+  responderFor: (model: string) => Responder;
   broadcast: (conferenceId: string, event: ServerEvent) => void;
+  /** Speaks a short notice into the conference's audio stream (locked-screen listeners); optional. */
+  announce?: (conferenceId: string, text: string) => void;
   log: { warn(o: object, m?: string): void; error(o: object, m?: string): void };
 }
 
@@ -62,7 +77,7 @@ export class QuestionService {
   }
 
   get configured() {
-    return this.deps.responder.configured;
+    return this.deps.responderFor(this.deps.config.answers.fast.model).configured;
   }
 
   queueLength(conferenceId: string): number {
@@ -99,16 +114,25 @@ export class QuestionService {
       });
       if (!detection.is_question || !detection.worth_answering) return;
 
+      // A question heard badly is confirmed by the listener first: an answer to the wrong question is worse than none.
+      const lowConfidence = segment.confidence !== null && segment.confidence < config.lowConfidenceThreshold;
+      const reasons = [
+        lowConfidence ? `Nhận dạng giọng nói không chắc chắn (độ tin cậy ${Math.round(segment.confidence! * 100)}%).` : '',
+        detection.is_clear ? '' : detection.unclear_reason.trim() || 'Câu hỏi chưa rõ ràng.',
+      ].filter(Boolean);
+      const unclear = reasons.length > 0;
       const budget = config.answers.autoBudgetUsd;
-      const overBudget = budget > 0 && (await this.spentOnAnswers(conference.id)) >= budget;
+      const overBudget = !unclear && budget > 0 && (await this.spentOnAnswers(conference.id)) >= budget;
+      const status = unclear ? 'awaiting_confirm' : overBudget ? 'awaiting_click' : 'detected';
       const [row] = await db.query(
-        `INSERT INTO questions (conference_id, segment_id, source, text_original, text_vi, language, status)
-         VALUES ($1, $2, 'auto', $3, $4, $5, $6) RETURNING *`,
-        [conference.id, segment.id, detection.question || segment.text_original, detection.question_vi || vi, segment.language, overBudget ? 'awaiting_click' : 'detected'],
+        `INSERT INTO questions (conference_id, segment_id, source, text_original, text_vi, language, status, unclear_reason)
+         VALUES ($1, $2, 'auto', $3, $4, $5, $6, $7) RETURNING *`,
+        [conference.id, segment.id, detection.question || segment.text_original, detection.question_vi || vi, segment.language, status, unclear ? reasons.join(' ') : null],
       );
       const question = toQuestionDto(row);
       this.emit(question);
-      if (!overBudget) await this.answer(question.id, conference, detection.keywords);
+      if (unclear) this.deps.announce?.(conference.id, 'Câu hỏi chưa nghe rõ. Hãy xác nhận trên màn hình.');
+      if (status === 'detected') await this.answer(question.id, conference, detection.keywords);
     } catch (err) {
       this.deps.log.warn({ err, segmentId: segment.id }, 'question detection failed');
     }
@@ -125,16 +149,41 @@ export class QuestionService {
     return question;
   }
 
+  /** Prices from .env for the two configured models, list prices for the other selectable ones. */
+  private priceFor(model: string) {
+    const { answers } = this.deps.config;
+    if (model === answers.fast.model) return answers.fast;
+    if (model === answers.model) return answers;
+    return ANSWER_MODEL_CHOICES[model as AnswerModelChoice] ?? answers;
+  }
+
+  /** Replaces the question text with the listener's correction before drafting; the stale translation is dropped. */
+  async correctText(questionId: string, text: string): Promise<void> {
+    const [row] = await this.deps.db.query(
+      `UPDATE questions SET text_original = $2, text_vi = NULL, unclear_reason = NULL, updated_at = now() WHERE id = $1 RETURNING *`,
+      [questionId, text],
+    );
+    if (row) this.emit(toQuestionDto(row));
+  }
+
+  async dismiss(questionId: string): Promise<QuestionDto | null> {
+    const [row] = await this.deps.db.query(`UPDATE questions SET status = 'dismissed', updated_at = now() WHERE id = $1 RETURNING *`, [questionId]);
+    if (!row) return null;
+    const q = toQuestionDto(row);
+    this.emit(q);
+    return q;
+  }
+
   /**
    * Drafts (or re-drafts) the answer, queued behind any answer already running for this conference.
    * Manual requests may exceed the auto-suggest budget but never the hard cost caps.
    */
-  answer(questionId: string, conference: ConferenceRow, extraKeywords: string[] = []): Promise<QuestionDto> {
+  answer(questionId: string, conference: ConferenceRow, extraKeywords: string[] = [], tier: AnswerTier = 'fast'): Promise<QuestionDto> {
     const id = conference.id;
     this.queued.set(id, this.queueLength(id) + 1);
     const run = (this.chains.get(id) ?? Promise.resolve())
       .catch(() => {})
-      .then(() => this.answerNow(questionId, conference, extraKeywords))
+      .then(() => this.answerNow(questionId, conference, extraKeywords, tier))
       .finally(() => {
         this.queued.set(id, Math.max(0, this.queueLength(id) - 1));
         if (this.chains.get(id) === run) this.chains.delete(id);
@@ -143,14 +192,25 @@ export class QuestionService {
     return run;
   }
 
-  private async answerNow(questionId: string, conference: ConferenceRow, extraKeywords: string[]): Promise<QuestionDto> {
-    const { db, responder, config } = this.deps;
+  private async answerNow(questionId: string, conference: ConferenceRow, extraKeywords: string[], tier: AnswerTier): Promise<QuestionDto> {
+    const { db, config } = this.deps;
+    // Read the choice at drafting time: a live room holds the conference row from when the session started.
+    const [choice] = await db.query<{ answer_model: string | null }>('SELECT answer_model FROM conferences WHERE id = $1', [conference.id]);
+    const model = tier === 'quality' ? config.answers.model : choice?.answer_model ?? config.answers.fast.model;
+    const responder = this.deps.responderFor(model);
+    // A question the listener removed (X) while it was queued or being drafted stays removed: no update revives it.
     const update = async (sql: string, params: unknown[]) => {
-      const [row] = await db.query(`UPDATE questions SET ${sql}, updated_at = now() WHERE id = $1 RETURNING *`, [questionId, ...params]);
+      const [row] = await db.query(`UPDATE questions SET ${sql}, updated_at = now() WHERE id = $1 AND status <> 'dismissed' RETURNING *`, [questionId, ...params]);
+      if (!row) {
+        const [current] = await db.query(`SELECT * FROM questions WHERE id = $1`, [questionId]);
+        return toQuestionDto(current);
+      }
       const q = toQuestionDto(row);
       this.emit(q);
       return q;
     };
+    const [existing] = await db.query<{ status: string }>(`SELECT status FROM questions WHERE id = $1`, [questionId]);
+    if (existing?.status === 'dismissed') return update('status = status', []);
     const verdict = await this.guard.check(conference.workspace_id, conference.id);
     if (!verdict.ok) return update(`status = 'error', error = $2`, [verdict.message]);
     const question = await update(`status = 'answering', error = NULL`, []);
@@ -173,7 +233,7 @@ export class QuestionService {
         },
         (delta) => this.deps.broadcast(conference.id, { type: 'answer.delta', questionId, delta }),
       );
-      const a = config.answers;
+      const a = this.priceFor(model);
       const u = result.usage;
       const cost = (u.input * a.inputUsdPerMTok + u.output * a.outputUsdPerMTok + u.cacheRead * a.cacheReadUsdPerMTok + u.cacheWrite * a.cacheWriteUsdPerMTok) / 1_000_000;
       await recordUsage(db, {

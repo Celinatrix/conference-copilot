@@ -137,8 +137,21 @@ export function SegmentMeta({ segment }: { segment: Segment }) {
   );
 }
 
+/**
+ * Entries hidden from the source list by default: the browser's "default"/"communications" aliases duplicate a real
+ * microphone already listed, and virtual devices (remote-desktop drivers such as DeskIn) capture no room audio.
+ */
+export function isHiddenInput(d: Pick<MediaDeviceInfo, 'deviceId' | 'label'>): boolean {
+  return d.deviceId === 'default' || d.deviceId === 'communications' || /virtual/i.test(d.label);
+}
+
 export function StartDialog({ open, onClose, onStart }: { open: boolean; onClose: () => void; onStart: (source: AudioSource) => Promise<void> }) {
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [allDevices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [showAll, setShowAll] = useState(false);
+  const realDevices = allDevices.filter((d) => !isHiddenInput(d));
+  // Never leave the list empty: a machine with only virtual inputs still shows them.
+  const devices = showAll || realDevices.length === 0 ? allDevices : realDevices;
+  const hiddenCount = allDevices.length - devices.length;
   const [choice, setChoice] = useState<string>('');
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +167,9 @@ export function StartDialog({ open, onClose, onStart }: { open: boolean; onClose
         await requestMicPermission();
         const list = await listInputDevices();
         setDevices(list);
-        setChoice((c) => c || (list[0] ? `device:${list[0].deviceId}` : support?.system ? 'system' : ''));
+        // Preselect the first real microphone, not a hidden alias or virtual device.
+        const first = list.find((d) => !isHiddenInput(d)) ?? list[0];
+        setChoice((c) => (c && !list.some((d) => `device:${d.deviceId}` === c && isHiddenInput(d)) ? c : first ? `device:${first.deviceId}` : support?.system ? 'system' : ''));
       } catch (err) {
         setError(describeMediaError(err));
         if (support?.system) setChoice('system');
@@ -191,6 +206,11 @@ export function StartDialog({ open, onClose, onStart }: { open: boolean; onClose
             ))}
             {support?.system && (
               <SourceOption checked={choice === 'system'} onSelect={() => setChoice('system')} title="Âm thanh hệ thống (tab / màn hình)" subtitle="Cho hội nghị online. Chrome/Edge: bật “Chia sẻ âm thanh” khi chọn." />
+            )}
+            {(hiddenCount > 0 || showAll) && realDevices.length > 0 && (
+              <button type="button" onClick={() => setShowAll((s) => !s)} className="text-xs text-faint hover:text-fg">
+                {showAll ? 'Ẩn thiết bị ảo và mục trùng lặp' : `Hiện tất cả thiết bị (${hiddenCount} đang ẩn: thiết bị ảo, Default, Communications)`}
+              </button>
             )}
           </div>
         </Field>

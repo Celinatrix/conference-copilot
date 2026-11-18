@@ -33,6 +33,14 @@ export function ListenStream({ conferenceId, title, onStart }: { conferenceId: s
 
   useEffect(() => () => stop(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The stream reads with the server's (Windows) voice, which is female-only: without one, the button is hidden.
+  const [available, setAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    api<{ status: TtsStatus }>('/api/tts/status')
+      .then(({ status }) => setAvailable(status.state === 'ready'))
+      .catch(() => setAvailable(false));
+  }, []);
+
   const start = () => {
     // play() must run synchronously inside the tap, or iOS refuses to start audio.
     let a = audioRef.current;
@@ -89,6 +97,7 @@ export function ListenStream({ conferenceId, title, onStart }: { conferenceId: s
   };
 
   const on = state !== 'off';
+  if (!available && !on) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <button

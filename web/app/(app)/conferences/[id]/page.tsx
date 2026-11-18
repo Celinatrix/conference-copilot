@@ -14,7 +14,8 @@ import { Badge, Button, Card, ErrorBanner, Spinner, StatusPill, inputClass } fro
 import { ConferenceSettingsDialog, JumpToLatest, LangBadge, StartDialog, elapsed, useAutoScroll } from '@/components/live/parts';
 import { OriginalRow, TranslationRow } from '@/components/live/rows';
 import { useFullscreen, useWakeLock } from '@/lib/screen';
-import { speaker } from '@/lib/tts';
+import { isAppleMobile, speaker } from '@/lib/tts';
+import { useHiddenSegments } from '@/lib/hidden-segments';
 
 type RoomState = Extract<LiveEvent, { type: 'state' }>;
 type PartialLine = { text: string; language: string | null; speaker: string | null };
@@ -77,6 +78,12 @@ export default function LiveConferencePage() {
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
   const [readAloud, setReadAloud] = useState(false);
   const readAloudRef = useRef(false);
+  const view = useHiddenSegments(id);
+  // Lines cleared with "X" are hidden from both columns only; stats, search and export still use every segment.
+  const visibleSegments = useMemo(() => (view.hidden.size ? segments.filter((s) => !view.hidden.has(s.id)) : segments), [segments, view.hidden]);
+  const hiddenCount = segments.length - visibleSegments.length;
+  const clearScreen = useCallback(() => view.hideAll(segments.map((s) => s.id)), [view, segments]);
+  const transcriptView = { hiddenCount, onHide: view.hideOne, onClear: clearScreen, onShowAll: view.showAll };
 
   const socketRef = useRef<LiveSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
@@ -91,6 +98,12 @@ export default function LiveConferencePage() {
   const isHost = capturing;
   // Keep the screen awake for the recording device and for anyone reading a live session on a phone.
   const wakeLock = useWakeLock(capturing || status === 'live');
+  // iPhone/iPad recording: iOS would send any reading to the loudspeaker, so reading pauses until recording stops.
+  const recordingOnPhone = capturing && isAppleMobile();
+  useEffect(() => {
+    speaker.recordingOnAppleMobile = recordingOnPhone;
+    if (recordingOnPhone) speaker.stop();
+  }, [recordingOnPhone]);
   const fullscreen = useFullscreen();
 
   const showToast = useCallback((msg: string) => {
@@ -143,7 +156,7 @@ export default function LiveConferencePage() {
           setDrafts(({ [e.segmentId]: _, ...rest }) => rest);
           if (e.latencyMs !== null) setLatencies((l) => [...l.slice(-19), e.latencyMs!]);
           // Only live translations are read; history and catch-up syncs arrive over REST and stay silent.
-          if (readAloudRef.current) speaker.say(e.text_vi);
+          if (readAloudRef.current && !e.skipped) speaker.say(e.text_vi);
           break;
         case 'translation.error':
           setSegments((prev) => prev.map((s) => (s.id === e.segmentId ? { ...s, translation_status: 'error', translation_error: e.message } : s)));
@@ -151,6 +164,8 @@ export default function LiveConferencePage() {
           break;
         case 'question': {
           const q = e.question;
+          // Fresh "please confirm" questions are announced in the earphones; a correction re-emits without a reason.
+          if (q.status === 'awaiting_confirm' && q.unclear_reason && readAloudRef.current) speaker.say('Câu hỏi chưa nghe rõ. Hãy xác nhận trên màn hình.');
           setQuestions((prev) => [q, ...prev.filter((x) => x.id !== q.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
           // A fresh or repeated drafting run starts an empty preview; any other status ends it.
           setAnswerDrafts(({ [q.id]: _, ...rest }) => (q.status === 'answering' ? { ...rest, [q.id]: '' } : rest));
@@ -320,6 +335,7 @@ export default function LiveConferencePage() {
   const saveTranslation = useCallback((segId: string, text: string) => patchSegment(segId, { text_vi: text }), [patchSegment]);
 
   const focusSegment = (segId: string) => {
+    view.showOne(segId); // jumping to a search result brings a hidden line back
     setTab('vi');
     setBigMode(false);
     setFlashId(segId);
@@ -362,7 +378,20 @@ export default function LiveConferencePage() {
               </div>
             )}
             {canManage && !capturing && status !== 'ending' && (
-              <Button variant="primary" onClick={() => setStartOpen(true)} disabled={Boolean(someoneElseHosting) || conn !== 'open'} title={someoneElseHosting ? 'Một thiết bị khác đang thu âm' : undefined}>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  // On iPhone, recording forces all page audio (the 🎧 translation) to the loudspeaker.
+                  if (
+                    isAppleMobile() &&
+                    !window.confirm('Thu âm bằng iPhone sẽ làm tiếng đọc bản dịch phát ra LOA NGOÀI (iOS không cho vào tai nghe khi đang thu).\n\nNên để LAPTOP thu âm, iPhone chỉ bấm 🎧 để nghe.\n\nVẫn thu âm bằng iPhone?')
+                  )
+                    return;
+                  setStartOpen(true);
+                }}
+                disabled={Boolean(someoneElseHosting) || conn !== 'open'}
+                title={someoneElseHosting ? 'Một thiết bị khác đang thu âm' : undefined}
+              >
                 <span className="size-2 rounded-full bg-white" />
                 {status === 'paused' && room?.hostUserId === user.id ? 'Tiếp tục trên thiết bị này' : 'Start Listening'}
               </Button>
@@ -407,6 +436,9 @@ export default function LiveConferencePage() {
               setReadAloud(next);
             }}
           />
+          {readAloud && recordingOnPhone && (
+            <Badge tone="warn">iPhone đang thu âm nên tạm không đọc (sẽ ra loa ngoài). Để laptop thu, iPhone chỉ nghe</Badge>
+          )}
           <ListenStream
             conferenceId={id}
             title={conference.name}
@@ -437,16 +469,18 @@ export default function LiveConferencePage() {
         {!bigMode && (
           <OriginalColumn
             hidden={tab !== 'original'}
-            segments={segments}
+            segments={visibleSegments}
             partial={partial}
             canEdit={canManage}
             historySeq={historySeqRef.current}
             onSave={saveOriginal}
+            view={transcriptView}
           />
         )}
         <TranslationColumn
           hidden={!bigMode && tab !== 'vi'}
-          segments={segments}
+          segments={visibleSegments}
+          view={transcriptView}
           drafts={drafts}
           partial={partial}
           fontSize={bigMode ? Math.max(fontSize, 30) : fontSize}
@@ -534,7 +568,7 @@ function ReadAloudControls({ on, onToggle }: { on: boolean; onToggle: () => void
           {rate}×
         </button>
       )}
-      {on && !voice && <Badge tone="warn">Máy chưa có giọng tiếng Việt: xem hướng dẫn cài trong README</Badge>}
+      {on && !voice && <Badge tone="warn">Máy chưa có giọng nữ tiếng Việt (Microsoft An / HoaiMy): xem hướng dẫn cài trong README</Badge>}
     </span>
   );
 }
@@ -554,16 +588,47 @@ function ColumnHeader({ title, children }: { title: string; children?: React.Rea
   );
 }
 
-function OriginalColumn({ hidden, segments, partial, canEdit, historySeq, onSave }: { hidden: boolean; segments: Segment[]; partial: PartialLine | null; canEdit: boolean; historySeq: number; onSave: (id: string, text: string) => Promise<void> }) {
+type TranscriptView = { hiddenCount: number; onHide: (id: string) => void; onClear: () => void; onShowAll: () => void };
+
+/** Column header controls: "↺ Hiện lại (N)" when lines are hidden, and "X" to clear the screen (view only). */
+function ViewControls({ view, empty }: { view: TranscriptView; empty: boolean }) {
+  return (
+    <>
+      {view.hiddenCount > 0 && (
+        <button onClick={view.onShowAll} className="rounded-md px-2 py-1 text-[11px] text-faint hover:bg-panel-2 hover:text-fg" title="Hiện lại các đoạn đã ẩn">
+          ↺ Hiện lại ({view.hiddenCount})
+        </button>
+      )}
+      <button
+        onClick={view.onClear}
+        disabled={empty}
+        aria-label="Dọn màn hình: ẩn toàn bộ đoạn hiện tại"
+        title="Dọn màn hình (ẩn các đoạn hiện có, không xoá khỏi transcript)"
+        className="grid size-7 place-items-center rounded-md border border-line-strong text-muted hover:border-live/60 hover:bg-live/10 hover:text-live disabled:pointer-events-none disabled:opacity-30"
+      >
+        <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </>
+  );
+}
+
+function OriginalColumn({ hidden, segments, partial, canEdit, historySeq, onSave, view }: { hidden: boolean; segments: Segment[]; partial: PartialLine | null; canEdit: boolean; historySeq: number; onSave: (id: string, text: string) => Promise<void>; view: TranscriptView }) {
   const ref = useRef<HTMLDivElement>(null);
   const { atBottom, jump } = useAutoScroll(ref, `${segments.length}:${partial?.text}`);
   return (
     <section className={`relative min-h-0 flex-col border-r border-line ${hidden ? 'hidden lg:flex' : 'flex'}`}>
-      <ColumnHeader title="Original Transcript">{partial?.language && <LangBadge code={partial.language} />}</ColumnHeader>
+      <ColumnHeader title="Original Transcript">
+        {partial?.language && <LangBadge code={partial.language} />}
+        <ViewControls view={view} empty={segments.length === 0} />
+      </ColumnHeader>
       <div ref={ref} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-        {segments.length === 0 && !partial && <EmptyState text="Nội dung gốc sẽ xuất hiện ở đây ngay khi diễn giả bắt đầu nói." />}
+        {segments.length === 0 && !partial && (
+          <EmptyState text={view.hiddenCount ? 'Đã dọn màn hình. Câu mới sẽ hiện ở đây.' : 'Nội dung gốc sẽ xuất hiện ở đây ngay khi diễn giả bắt đầu nói.'} />
+        )}
         {segments.map((s) => (
-          <OriginalRow key={s.id} segment={s} canEdit={canEdit} animate={s.seq > historySeq} onSave={onSave} />
+          <OriginalRow key={s.id} segment={s} canEdit={canEdit} animate={s.seq > historySeq} onSave={onSave} onHide={view.onHide} />
         ))}
         {partial && (
           <div aria-live="polite">
@@ -595,6 +660,7 @@ function TranslationColumn(props: {
   onToggleImportant: (s: Segment) => void;
   fullscreen: { supported: boolean; isFullscreen: boolean; toggle: () => Promise<void> };
   wakeLockHeld: boolean;
+  view: TranscriptView;
 }) {
   const { segments, drafts, fontSize, setFontSize, bigMode, setBigMode, fullscreen } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -619,9 +685,12 @@ function TranslationColumn(props: {
             {fullscreen.isFullscreen ? 'Thoát ⛶' : '⛶'}
           </button>
         )}
+        <ViewControls view={props.view} empty={segments.length === 0} />
       </ColumnHeader>
       <div ref={ref} className={`min-h-0 flex-1 overflow-y-auto py-5 ${bigMode ? 'mx-auto w-full max-w-5xl px-6' : 'px-6'}`}>
-        {segments.length === 0 && <EmptyState text="Bản dịch tiếng Việt sẽ hiện ra liên tục, thường chỉ sau khoảng 1–2 giây." />}
+        {segments.length === 0 && (
+          <EmptyState text={props.view.hiddenCount ? 'Đã dọn màn hình. Bản dịch câu mới sẽ hiện ở đây.' : 'Bản dịch tiếng Việt sẽ hiện ra liên tục, thường chỉ sau khoảng 1–2 giây.'} />
+        )}
         <div className="space-y-5" style={{ fontSize, lineHeight: 1.55 }}>
           {segments.map((s) => (
             <TranslationRow
@@ -635,6 +704,7 @@ function TranslationColumn(props: {
               onSave={props.onSave}
               onRetranslate={props.onRetranslate}
               onToggleImportant={props.onToggleImportant}
+              onHide={props.view.onHide}
             />
           ))}
           {props.partial && props.live && (

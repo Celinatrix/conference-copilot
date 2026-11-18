@@ -2,7 +2,10 @@
 
 import { useRef, useState } from 'react';
 import {
+  ANSWER_MODELS,
   api,
+  DEFAULT_ANSWER_MODEL,
+  modelLabel,
   RESPONSE_MODE_LABELS,
   type Conference,
   type KbDocument,
@@ -93,13 +96,28 @@ export function AssistantPanel(props: {
     }
   };
 
-  const reanswer = async (q: Question) => {
+  const reanswer = async (q: Question, correctedText?: string, quality = false) => {
     try {
-      await api(`/api/questions/${q.id}/answer`, { method: 'POST' });
+      const text = correctedText?.trim();
+      const body = { ...(text && text !== q.text_original ? { text } : {}), ...(quality ? { quality: true } : {}) };
+      await api(`/api/questions/${q.id}/answer`, { method: 'POST', ...(Object.keys(body).length ? { json: body } : {}) });
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Không soạn lại được');
     }
   };
+
+  const dismiss = async (q: Question) => {
+    try {
+      await api(`/api/questions/${q.id}/dismiss`, { method: 'POST' });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Không bỏ qua được');
+    }
+  };
+
+  // Questions waiting for confirmation come first: they block an answer until the listener acts.
+  const visible = questions
+    .filter((q) => q.status !== 'dismissed')
+    .sort((a, b) => Number(b.status === 'awaiting_confirm') - Number(a.status === 'awaiting_confirm'));
 
   const toggleMode = async (m: ResponseMode) => {
     const next = modes.includes(m) ? modes.filter((x) => x !== m) : [...modes, m];
@@ -108,6 +126,21 @@ export function AssistantPanel(props: {
     try {
       const { conference: c } = await api<{ conference: Conference }>(`/api/conferences/${conference.id}`, { method: 'PATCH', json: { response_modes: next } });
       props.onConferenceChange(c);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Không lưu được');
+    }
+  };
+
+  const answerModel = conference.answer_model ?? DEFAULT_ANSWER_MODEL;
+  const chooseModel = async (id: string) => {
+    if (id === answerModel) return;
+    try {
+      const { conference: c } = await api<{ conference: Conference }>(`/api/conferences/${conference.id}`, {
+        method: 'PATCH',
+        json: { answer_model: id === DEFAULT_ANSWER_MODEL ? null : id },
+      });
+      props.onConferenceChange(c);
+      toast(`Gợi ý tiếp theo sẽ soạn bằng ${ANSWER_MODELS.find((m) => m.id === id)?.name ?? id}`);
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Không lưu được');
     }
@@ -176,6 +209,38 @@ export function AssistantPanel(props: {
         </div>
       </div>
 
+      {/* Answer model */}
+      <div>
+        <div className="mb-2 text-xs font-medium tracking-[0.18em] text-faint uppercase">Model soạn gợi ý</div>
+        <div className="grid gap-1.5" role="radiogroup" aria-label="Model soạn gợi ý">
+          {ANSWER_MODELS.map((m) => {
+            const selected = m.id === answerModel;
+            return (
+              <button
+                key={m.id}
+                role="radio"
+                aria-checked={selected}
+                disabled={!canManage}
+                onClick={() => void chooseModel(m.id)}
+                className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left disabled:cursor-default ${
+                  selected ? 'border-electric bg-electric/15' : 'border-line-strong hover:border-electric/50'
+                }`}
+              >
+                <span className={`grid size-4 shrink-0 place-items-center rounded-full border ${selected ? 'border-electric' : 'border-line-strong'}`}>
+                  {selected && <span className="size-2 rounded-full bg-electric" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{m.name}</span>
+                  <span className="block text-[11px] text-faint">{m.note}</span>
+                </span>
+                <span className="shrink-0 font-mono text-[11px] text-muted">{m.cost}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-faint">Áp dụng cho câu hỏi tiếp theo, kể cả khi đang nghe. Câu soạn bằng Haiku vẫn có nút “Soạn kỹ hơn (Sonnet)”.</p>
+      </div>
+
       {/* Ask */}
       <div>
         <div className="mb-2 text-xs font-medium tracking-[0.18em] text-faint uppercase">Hỏi trợ lý</div>
@@ -205,26 +270,123 @@ export function AssistantPanel(props: {
       <div>
         <div className="mb-2 flex items-center justify-between text-xs font-medium tracking-[0.18em] text-faint uppercase">
           <span>Câu hỏi &amp; gợi ý</span>
-          <span className="text-cyan">{questions.length}</span>
+          <span className="text-cyan">{visible.length}</span>
         </div>
-        {questions.length === 0 && <p className="text-xs leading-relaxed text-faint">Khi đang nghe, câu hỏi của giám khảo được tự phát hiện và gợi ý trả lời hiện ở đây.</p>}
+        {visible.length === 0 && <p className="text-xs leading-relaxed text-faint">Khi đang nghe, câu hỏi của giám khảo được tự phát hiện và gợi ý trả lời hiện ở đây.</p>}
         <ul className="space-y-3">
-          {questions.map((q) => (
+          {visible.map((q) => (
             <li key={q.id}>
-              <QuestionCard q={q} draft={answerDrafts[q.id]} onZoom={() => setZoomId(q.id)} onReanswer={() => void reanswer(q)} />
+              {q.status === 'awaiting_confirm' ? (
+                <ConfirmCard q={q} onConfirm={(text) => void reanswer(q, text)} onDismiss={() => void dismiss(q)} />
+              ) : (
+                <QuestionCard
+                  q={q}
+                  draft={answerDrafts[q.id]}
+                  onZoom={() => setZoomId(q.id)}
+                  onReanswer={() => void reanswer(q)}
+                  onUpgrade={() => void reanswer(q, undefined, true)}
+                  onDismiss={() => void dismiss(q)}
+                />
+              )}
             </li>
           ))}
         </ul>
       </div>
 
       <Dialog open={Boolean(zoomed)} onClose={() => setZoomId(null)} title="Gợi ý trả lời" wide>
-        {zoomed && <QuestionCard q={zoomed} draft={answerDrafts[zoomed.id]} big onReanswer={() => void reanswer(zoomed)} />}
+        {zoomed && (
+          <QuestionCard
+            q={zoomed}
+            draft={answerDrafts[zoomed.id]}
+            big
+            onReanswer={() => void reanswer(zoomed)}
+            onUpgrade={() => void reanswer(zoomed, undefined, true)}
+          />
+        )}
       </Dialog>
     </div>
   );
 }
 
-function QuestionCard({ q, draft, big, onZoom, onReanswer }: { q: Question; draft?: string; big?: boolean; onZoom?: () => void; onReanswer: () => void }) {
+/** "X": removes a question from the list for everyone following the conference. */
+function DismissButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label="Xoá câu hỏi này khỏi danh sách"
+      title="Xoá câu hỏi này"
+      className="grid size-6 place-items-center rounded-md border border-line-strong text-muted hover:border-live/60 hover:bg-live/10 hover:text-live"
+    >
+      <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </button>
+  );
+}
+
+/** A question heard unclearly: the listener checks (and may correct) the text before any answer is drafted. */
+function ConfirmCard({ q, onConfirm, onDismiss }: { q: Question; onConfirm: (text: string) => void; onDismiss: () => void }) {
+  const [text, setText] = useState(q.text_original);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="rounded-xl border-2 border-warn/60 bg-warn/10 p-3" role="alert">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm font-medium text-warn">⚠ Nghe chưa rõ câu hỏi, hãy xác nhận</div>
+        <DismissButton onClick={onDismiss} />
+      </div>
+      {q.unclear_reason && <p className="mt-1 text-xs text-muted">{q.unclear_reason}</p>}
+      {q.text_vi && <p className="mt-1.5 text-xs text-muted">Bản dịch app nghe được: {q.text_vi}</p>}
+      <textarea
+        className={`${inputClass} mt-2 min-h-16 resize-y`}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim().length >= 3) {
+            setBusy(true);
+            onConfirm(text);
+          }
+        }}
+        aria-label="Câu hỏi (sửa nếu sai)"
+      />
+      <p className="mt-1 text-[11px] text-faint">Sửa lại câu hỏi nếu app nghe sai, rồi bấm xác nhận.</p>
+      <div className="mt-2 flex gap-2">
+        <Button
+          variant="primary"
+          className="flex-1"
+          loading={busy}
+          disabled={text.trim().length < 3}
+          onClick={() => {
+            setBusy(true);
+            onConfirm(text);
+          }}
+        >
+          Đúng, soạn gợi ý
+        </Button>
+        <Button onClick={onDismiss}>Bỏ qua</Button>
+      </div>
+    </div>
+  );
+}
+
+function QuestionCard({
+  q,
+  draft,
+  big,
+  onZoom,
+  onReanswer,
+  onUpgrade,
+  onDismiss,
+}: {
+  q: Question;
+  draft?: string;
+  big?: boolean;
+  onZoom?: () => void;
+  onReanswer: () => void;
+  onUpgrade: () => void;
+  /** Removes the question from the list (not shown inside the zoom dialog). */
+  onDismiss?: () => void;
+}) {
+  const isQuickDraft = Boolean(q.answer_model?.includes('haiku'));
   return (
     <div className="rounded-xl border border-line bg-navy/50 p-3">
       <div className="flex items-start justify-between gap-2">
@@ -232,14 +394,18 @@ function QuestionCard({ q, draft, big, onZoom, onReanswer }: { q: Question; draf
           <p className={`font-medium ${big ? 'text-lg' : 'text-sm'}`}>{q.text_original}</p>
           {q.text_vi && q.text_vi !== q.text_original && <p className="mt-0.5 text-xs text-muted">{q.text_vi}</p>}
         </div>
-        {onZoom && q.answer && (
-          <button onClick={onZoom} className="shrink-0 rounded-md border border-line-strong px-2 py-0.5 text-xs text-muted hover:text-fg">
-            Phóng to
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {onZoom && q.answer && (
+            <button onClick={onZoom} className="rounded-md border border-line-strong px-2 py-0.5 text-xs text-muted hover:text-fg">
+              Phóng to
+            </button>
+          )}
+          {onDismiss && <DismissButton onClick={onDismiss} />}
+        </div>
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {q.source === 'auto' ? <Badge tone="cyan">Tự phát hiện</Badge> : <Badge>Hỏi tay</Badge>}
+        {q.status === 'answered' && q.answer_model && <Badge tone={isQuickDraft ? 'default' : 'ok'}>{modelLabel(q.answer_model)}</Badge>}
         {(q.status === 'detected' || q.status === 'answering') && (
           <Badge tone="warn">
             <Spinner className="size-2.5" /> Đang soạn…
@@ -260,6 +426,11 @@ function QuestionCard({ q, draft, big, onZoom, onReanswer }: { q: Question; draf
         <Button className="mt-2 w-full" onClick={onReanswer}>Đã hết ngân sách tự động. Bấm để soạn gợi ý</Button>
       )}
       {q.status === 'answered' && q.answer && <AnswerView answer={q.answer} big={big} onReanswer={onReanswer} />}
+      {q.status === 'answered' && isQuickDraft && (
+        <Button className="mt-2 w-full" onClick={onUpgrade} title="Soạn lại bằng Sonnet: lập luận chặt hơn, tốn khoảng 20 lần phí của bản nháp">
+          ✨ Soạn kỹ hơn (Sonnet)
+        </Button>
+      )}
     </div>
   );
 }

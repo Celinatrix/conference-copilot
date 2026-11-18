@@ -14,6 +14,12 @@ const NewQuestion = z
   })
   .refine((v) => v.segmentId || v.text, 'Cần segmentId hoặc text');
 
+/**
+ * `text`: optional correction when the listener confirms a question heard unclearly.
+ * `quality`: draft with the stronger (more expensive) model instead of the cheap first-draft model.
+ */
+const AnswerRequest = z.object({ text: z.string().trim().min(3).max(2000).optional(), quality: z.boolean().optional() }).optional();
+
 export function questionRoutes(app: FastifyInstance, ctx: AppContext) {
   const { db, questions } = ctx;
   const perUser = new AttemptLimiter(ctx.config.aiRateLimits.questionsPerMinute, 60_000);
@@ -79,13 +85,25 @@ export function questionRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post('/api/questions/:id/answer', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!/^[0-9a-f-]{36}$/i.test(id)) return notFound(reply);
+    const body = AnswerRequest.parse(req.body ?? undefined);
     const [q] = await db.query<{ conference_id: string; status: string }>('SELECT conference_id, status FROM questions WHERE id = $1', [id]);
     if (!q) return notFound(reply);
     const access = await getConferenceAccess(db, q.conference_id, req.user!.id);
     if (!access) return notFound(reply);
     if (q.status === 'answering') return reply.code(409).send({ error: 'busy', message: 'Đang soạn câu trả lời.' });
     if (await refuse(reply, req.user!.id, access.conference.workspace_id, q.conference_id)) return reply;
-    void questions.answer(id, access.conference);
+    if (body?.text) await questions.correctText(id, body.text);
+    void questions.answer(id, access.conference, [], body?.quality ? 'quality' : 'fast');
     return reply.code(202).send({ ok: true });
+  });
+
+  // Any viewer may remove a question from the list (X), at any stage; an answer still being drafted is discarded.
+  app.post('/api/questions/:id/dismiss', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return notFound(reply);
+    const [q] = await db.query<{ conference_id: string }>('SELECT conference_id FROM questions WHERE id = $1', [id]);
+    if (!q) return notFound(reply);
+    if (!(await getConferenceAccess(db, q.conference_id, req.user!.id))) return notFound(reply);
+    return { question: await questions.dismiss(id) };
   });
 }

@@ -61,7 +61,16 @@ class FakeDetector extends QuestionDetector {
   }
   override async detect(input: { current: string; currentVi: string | null; previous: string[] }) {
     return {
-      detection: { is_question: true, worth_answering: true, question: input.current, question_vi: `VI: ${input.current}`, keywords: ['IBNR'] },
+      detection: {
+        is_question: true,
+        worth_answering: true,
+        question: input.current,
+        question_vi: `VI: ${input.current}`,
+        keywords: ['IBNR'],
+        // "[garbled]" in the transcript stands in for a question the model judges unclear.
+        is_clear: !input.current.includes('[garbled]'),
+        unclear_reason: input.current.includes('[garbled]') ? 'Câu hỏi bị cắt giữa chừng.' : '',
+      },
       inputTokens: 10,
       outputTokens: 10,
     };
@@ -70,8 +79,8 @@ class FakeDetector extends QuestionDetector {
 
 /** Answers from whatever context it is given, citing the first chunk, at a fixed $0.30 per answer. */
 class FakeResponder extends Responder {
-  constructor() {
-    super(null, 'fake-responder');
+  constructor(model: string) {
+    super(null, model);
   }
   override get configured() {
     return true;
@@ -143,9 +152,19 @@ beforeAll(async () => {
   db = await openPglite(null);
   const defaults = loadConfig();
   // Functional tests: open signup so each test user gets an isolated workspace (invite flow is in security.test.ts).
-  const config = loadConfig({ allowedOrigins: [ORIGIN], port: 0, allowSignup: true, registerPerHour: 1000, answers: { ...defaults.answers, autoBudgetUsd: 0.5 } });
+  // Both answer tiers priced alike here so the budget arithmetic below stays at $0.30 per answer.
+  const { model: _m, ...qualityPrices } = defaults.answers;
+  const answers = { ...defaults.answers, autoBudgetUsd: 0.5, fast: { ...defaults.answers.fast, ...qualityPrices, model: 'fake-fast' } };
+  const config = loadConfig({ allowedOrigins: [ORIGIN], port: 0, allowSignup: true, registerPerHour: 1000, answers });
   await migrate(db, config.migrationsDir);
-  ({ app } = await buildApp(db, config, { logger: false, stt, translator, detector: new FakeDetector(), responder: new FakeResponder() }));
+  ({ app } = await buildApp(db, config, {
+    logger: false,
+    stt,
+    translator,
+    detector: new FakeDetector(),
+    responder: new FakeResponder('fake-quality'),
+    fastResponder: new FakeResponder('fake-fast'),
+  }));
   actAsBrowser(app, ORIGIN);
   await app.listen({ port: 0, host: '127.0.0.1' });
   const addr = app.server.address() as { port: number };
@@ -345,7 +364,8 @@ describe('conferences and live pipeline', () => {
     const answered1 = nextEvent(ws, 'question', (e) => e.question.status === 'answered');
     ask('What drove the IBNR increase this year?', 0);
     const q1 = (await answered1).question;
-    expect(q1).toMatchObject({ source: 'auto', text_vi: 'VI: What drove the IBNR increase this year?' });
+    // Auto-detected questions get the cheap first-draft model.
+    expect(q1).toMatchObject({ source: 'auto', text_vi: 'VI: What drove the IBNR increase this year?', answer_model: 'fake-fast' });
     expect(q1.answer.context).toBe('all');
     expect(q1.answer.options.map((o: { mode: string }) => o.mode)).toEqual(['professional', 'concise', 'strategic']);
     expect(q1.answer.options[0].citations[0]).toMatchObject({ filename: 'notes.docx', locator: 'phần 1' });
@@ -369,6 +389,74 @@ describe('conferences and live pipeline', () => {
 
     expect((await app.inject({ method: 'PATCH', url: `/api/conferences/${id}`, headers: { cookie }, payload: { response_modes: ['academic', 'technical'] } })).json().conference.response_modes).toEqual(['academic', 'technical']);
     expect((await app.inject({ method: 'PATCH', url: `/api/conferences/${id}`, headers: { cookie }, payload: { response_modes: ['academic', 'technical', 'concise', 'strategic'] } })).statusCode).toBe(400);
+
+    ws.send(JSON.stringify({ type: 'stop' }));
+    await nextEvent(ws, 'state', (e) => e.status === 'idle');
+    ws.close();
+  });
+
+  it('asks the listener to confirm unclear questions before drafting an answer', async () => {
+    const cookie = await register('confirm@example.com');
+    const id = (await app.inject({ method: 'POST', url: '/api/conferences', headers: { cookie }, payload: { name: 'Q&A' } })).json().conference.id;
+    const { ticket } = (await app.inject({ method: 'POST', url: `/api/conferences/${id}/ws-ticket`, headers: { cookie } })).json();
+    const ws = new WebSocket(`ws://${baseUrl}/ws?ticket=${ticket}`, { origin: ORIGIN });
+    await nextEvent(ws, 'state');
+    ws.send(JSON.stringify({ type: 'start', audioSource: 'microphone', consent: true }));
+    await nextEvent(ws, 'state', (e) => e.status === 'live');
+    const ask = (text: string, at: number, confidence: number) =>
+      stt.handlers!.onResult({ isFinal: true, speechFinal: true, text, language: 'en', speaker: 'Judge', startSec: at, endSec: at + 2, confidence });
+
+    // Low recognition confidence: held for confirmation, nothing drafted or billed.
+    const held = nextEvent(ws, 'question', (e) => e.question.status === 'awaiting_confirm');
+    ask('Why did you choose a sixty percent quota share?', 0, 0.5);
+    const q1 = (await held).question;
+    expect(q1.unclear_reason).toContain('50%');
+    expect(q1.answer).toBeNull();
+
+    // Confirming with a corrected text drafts the answer for the corrected question.
+    const answered = nextEvent(ws, 'question', (e) => e.question.id === q1.id && e.question.status === 'answered');
+    const confirm = await app.inject({ method: 'POST', url: `/api/questions/${q1.id}/answer`, headers: { cookie }, payload: { text: 'Why did you choose a 60% quota share with Gen Re?' } });
+    expect(confirm.statusCode).toBe(202);
+    expect((await answered).question).toMatchObject({ text_original: 'Why did you choose a 60% quota share with Gen Re?', unclear_reason: null });
+
+    // Clear audio but a question the detector judges unclear: also held; dismissing it removes it from play.
+    const held2 = nextEvent(ws, 'question', (e) => e.question.status === 'awaiting_confirm');
+    ask('What about the [garbled] reserve?', 3, 0.95);
+    const q2 = (await held2).question;
+    expect(q2.unclear_reason).toBe('Câu hỏi bị cắt giữa chừng.');
+    const dismissed = await app.inject({ method: 'POST', url: `/api/questions/${q2.id}/dismiss`, headers: { cookie } });
+    expect(dismissed.json().question.status).toBe('dismissed');
+
+    // A clear, confident question still goes straight to an answer.
+    const direct = nextEvent(ws, 'question', (e) => e.question.status === 'answered' && e.question.id !== q1.id);
+    ask('How do you validate the TPD assumptions?', 6, 0.95);
+    const q3 = (await direct).question;
+    expect(q3).toMatchObject({ unclear_reason: null, answer_model: 'fake-fast' });
+
+    // "Draft more carefully" re-answers with the stronger model.
+    const upgraded = nextEvent(ws, 'question', (e) => e.question.id === q3.id && e.question.status === 'answered' && e.question.answer_model === 'fake-quality');
+    expect((await app.inject({ method: 'POST', url: `/api/questions/${q3.id}/answer`, headers: { cookie }, payload: { quality: true } })).statusCode).toBe(202);
+    await upgraded;
+
+    // The conference's model choice applies to the next draft, even mid-session; unknown models are refused.
+    const patchModel = (answer_model: unknown) => app.inject({ method: 'PATCH', url: `/api/conferences/${id}`, headers: { cookie }, payload: { answer_model } });
+    expect((await patchModel('gpt-4o')).statusCode).toBe(400);
+    expect((await patchModel('claude-sonnet-5-5')).json().conference.answer_model).toBe('claude-sonnet-5-5');
+    // This conference is past its $0.50 auto budget by now, so the question waits for a click; the click drafts with the chosen model.
+    const waiting = nextEvent(ws, 'question', (e) => e.question.status === 'awaiting_click');
+    ask('Why only five rider age bands?', 9, 0.95);
+    const q4 = (await waiting).question;
+    const bySonnet = nextEvent(ws, 'question', (e) => e.question.id === q4.id && e.question.status === 'answered');
+    await app.inject({ method: 'POST', url: `/api/questions/${q4.id}/answer`, headers: { cookie } });
+    expect((await bySonnet).question.answer_model).toBe('fake-quality');
+    expect((await patchModel(null)).json().conference.answer_model).toBeNull();
+
+    // X on an answered question removes it, and re-drafting it later cannot bring it back.
+    expect((await app.inject({ method: 'POST', url: `/api/questions/${q4.id}/dismiss`, headers: { cookie } })).json().question.status).toBe('dismissed');
+    await app.inject({ method: 'POST', url: `/api/questions/${q4.id}/answer`, headers: { cookie } });
+    await new Promise((r) => setTimeout(r, 200));
+    const after = (await app.inject({ url: `/api/conferences/${id}/questions`, headers: { cookie } })).json().questions.find((x: { id: string }) => x.id === q4.id);
+    expect(after.status).toBe('dismissed');
 
     ws.send(JSON.stringify({ type: 'stop' }));
     await nextEvent(ws, 'state', (e) => e.status === 'idle');

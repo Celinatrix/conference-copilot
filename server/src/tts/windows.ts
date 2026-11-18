@@ -107,7 +107,7 @@ export class WindowsTts {
           const installed = fromB64(a ?? '') || 'không có';
           this.status = {
             state: 'no_voice',
-            message: `Windows chưa có giọng đọc "${this.lang}". Giọng đang có: ${installed}. Cài: Settings → Time & Language → Speech → Add voices → Vietnamese, rồi khởi động lại server.`,
+            message: `Windows chưa có giọng NỮ cho "${this.lang}" (app chỉ đọc bằng giọng nữ). Giọng đang có: ${installed}.`,
           };
           this.ready = null;
           reject(new Error(this.status.message));
