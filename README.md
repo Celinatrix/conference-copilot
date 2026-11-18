@@ -1,59 +1,65 @@
 # Conference AI Copilot
 
-Trợ lý phiên dịch hội nghị theo thời gian thực: nghe diễn giả nói bằng bất kỳ ngôn ngữ nào, chuyển thành văn bản,
-dịch sang **tiếng Việt** sau khoảng 1–2 giây, lưu toàn bộ transcript, và cho cả nhóm 10–20 người cùng theo dõi một phiên.
+Trợ lý phiên dịch và trả lời câu hỏi cho hội nghị, cuộc thi thuyết trình bằng tiếng Anh:
 
-> **Trạng thái:** đã chạy thật với Deepgram và Claude, và đã triển khai lên đám mây (giao diện trên Vercel, server +
-> PostgreSQL trên Railway; xem [docs/DEPLOY.md](docs/DEPLOY.md)). Có 80 test tự động, chạy lại trên GitHub Actions mỗi
-> lần đẩy code. Xem [Trạng thái tính năng](#trạng-thái-tính-năng) để biết chính xác phần nào đã kiểm chứng.
+- **Nghe** người nói (giám khảo, diễn giả) và chuyển thành văn bản theo thời gian thực.
+- **Dịch sang tiếng Việt** sau khoảng 1–2 giây, và **đọc bản dịch bằng một giọng nữ** qua tai nghe.
+- **Phát hiện câu hỏi dành cho đội mình**, hiện popup có tiếng "ting" để bạn chọn **Trả lời** hoặc **Skip**.
+- **Gợi ý câu trả lời chỉ dựa trên tài liệu bạn tải lên** (báo cáo, slide, kịch bản), có trích dẫn nguồn, không bịa
+  thêm nội dung.
+- **Lưu toàn bộ transcript**, xuất file PDF tiếng Việt, và cho cả nhóm cùng xem một phiên trên nhiều thiết bị.
+
+> **Trạng thái:** đã chạy thật với Deepgram và Claude. Bản đám mây gồm giao diện trên Vercel, server + PostgreSQL trên
+> Railway (xem [docs/DEPLOY.md](docs/DEPLOY.md)). Có 84 test tự động, chạy lại trên GitHub Actions.
 
 ---
 
 ## Mục lục
 
-1. [Trạng thái tính năng](#trạng-thái-tính-năng)
+1. [Tính năng](#tính-năng)
 2. [Cách hoạt động](#cách-hoạt-động)
-3. [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
-4. [Cài đặt và chạy lần đầu](#cài-đặt-và-chạy-lần-đầu)
-5. [Hướng dẫn sử dụng](#hướng-dẫn-sử-dụng)
-6. [Cấu hình (.env)](#cấu-hình-env)
-7. [Chi phí và giới hạn](#chi-phí-và-giới-hạn)
-8. [Bảo mật](#bảo-mật)
-9. [Kiểm thử, benchmark và kiểm tra bảo mật](#kiểm-thử-benchmark-và-kiểm-tra-bảo-mật)
-10. [Cấu trúc mã nguồn](#cấu-trúc-mã-nguồn)
-11. [API](#api)
-12. [Cơ sở dữ liệu và migration](#cơ-sở-dữ-liệu-và-migration)
-13. [Triển khai production](#triển-khai-production)
-14. [Hạn chế đã biết](#hạn-chế-đã-biết)
-15. [Xử lý sự cố](#xử-lý-sự-cố)
-16. [Lộ trình](#lộ-trình)
+3. [Cài đặt và chạy trên máy](#cài-đặt-và-chạy-trên-máy)
+4. [Hướng dẫn sử dụng](#hướng-dẫn-sử-dụng)
+5. [Câu hỏi và gợi ý trả lời](#câu-hỏi-và-gợi-ý-trả-lời)
+6. [Nghe bản dịch trên iPhone](#nghe-bản-dịch-trên-iphone)
+7. [Cấu hình (.env)](#cấu-hình-env)
+8. [Chi phí và giới hạn](#chi-phí-và-giới-hạn)
+9. [Bảo mật](#bảo-mật)
+10. [Kiểm thử](#kiểm-thử)
+11. [Cấu trúc mã nguồn](#cấu-trúc-mã-nguồn)
+12. [API](#api)
+13. [Cơ sở dữ liệu và migration](#cơ-sở-dữ-liệu-và-migration)
+14. [Triển khai lên đám mây](#triển-khai-lên-đám-mây)
+15. [Hạn chế đã biết](#hạn-chế-đã-biết)
+16. [Xử lý sự cố](#xử-lý-sự-cố)
 
 ---
 
-## Trạng thái tính năng
+## Tính năng
 
 | Tính năng | Trạng thái | Ghi chú |
 | --- | --- | --- |
-| Đăng nhập, phiên cookie, đăng xuất | ✅ Hoạt động | Mật khẩu băm scrypt, token phiên lưu dạng hash |
-| Workspace, mời thành viên bằng link (Owner / Admin / Thành viên) | ✅ Hoạt động | Đăng ký công khai tắt sau tài khoản đầu tiên |
-| Tạo / sửa / xóa hội nghị, lịch sử, tìm kiếm | ✅ Hoạt động | Mỗi hội nghị có chế độ riêng tư hoặc chia sẻ workspace |
-| Thu âm micro / USB audio interface / âm thanh tab | ✅ Có code, ⚠️ chưa thử với micro thật | AudioWorklet 16 kHz PCM16 |
-| Nhận dạng giọng nói streaming (Deepgram) | ⚠️ Chưa chạy với API thật | Có test với bản giả lập |
-| Dịch tiếng Việt streaming (Claude Haiku) | ⚠️ Chưa chạy với API thật | Có test với bản giả lập |
-| Ghép câu trước khi dịch, dịch song song 3 câu | ✅ Hoạt động (test) | Tránh câu dịch bị cắt vụn |
-| Transcript tự lưu, sửa, dịch lại, đánh dấu ★, tìm kiếm | ✅ Hoạt động | |
-| Cờ cảnh báo đoạn đáng ngờ (nghe không rõ, số liệu lệch, thuật ngữ sai) | ✅ Backend, ⚠️ chưa hiển thị trên giao diện | |
-| Xuất PDF / Markdown / TXT | ✅ Hoạt động | PDF có tiếng Việt đầy đủ dấu (nhúng font Be Vietnam Pro); DOCX chưa có |
-| Nhiều người cùng xem một phiên | ✅ Hoạt động | Đo được dưới 8 ms để đẩy tới 20 người (phần server) |
-| Tự kết nối lại khi rớt mạng, giữ 2 phút âm thanh | ✅ Có code, ⚠️ chưa thử rớt mạng thật | |
-| Chế độ chữ lớn, toàn màn hình, giữ màn hình sáng | ✅ Hoạt động | |
-| Knowledge Base: upload PDF, DOCX, PPTX, XLSX, CSV | ✅ Hoạt động | Cột "Trợ lý trả lời" |
-| Phát hiện câu hoặc gõ câu hỏi + gợi ý trả lời có trích dẫn tài liệu | ✅ Có giao diện, ⚠️ chưa chạy với API thật | Tối đa 3 kiểu trả lời, tiếng Việt + tiếng Anh |
-| Theo dõi chi phí, trần chi phí cứng | ✅ Hoạt động | |
-| Đọc bản dịch tiếng Việt thành tiếng (qua tai nghe) | ✅ Có code, ⚠️ chưa thử trên điện thoại thật | Trong trình duyệt, hoặc luồng MP3 từ giọng Windows (nghe được khi khóa màn hình) |
-| Mở app trên điện thoại cùng mạng (chế độ LAN) | ✅ Hoạt động | `npm run dev:server:lan` + `npm run dev:web:lan` |
-| Chặn im lặng (VAD) | ❌ Chưa làm | |
-| Báo cáo tổng hợp sau hội nghị | ❌ Chưa làm | |
+| Đăng nhập, workspace, mời thành viên bằng link | ✅ | Tài khoản đầu tiên là Owner; sau đó chỉ vào bằng link mời |
+| Tạo / sửa / xóa hội nghị, tìm kiếm, lịch sử | ✅ | Riêng tư hoặc chia sẻ trong workspace |
+| Thu âm micro, USB audio interface, âm thanh tab | ✅ | Ẩn micro ảo và micro trùng lặp trong danh sách |
+| Nhận dạng giọng nói streaming (Deepgram nova-3) | ✅ Đã chạy thật | Có glossary để nghe đúng thuật ngữ |
+| Dịch tiếng Việt streaming (Claude Haiku 5.5) | ✅ Đã chạy thật | Ghép câu trước khi dịch, dịch song song 3 câu |
+| Đọc bản dịch bằng giọng nữ qua tai nghe | ✅ | Chỉ giọng nữ (HoaiMy trên PC, Linh trên iPhone); không có giọng nam |
+| Tải tài liệu: PDF, DOCX, PPTX, XLSX, CSV | ✅ | Cột "Trợ lý trả lời" |
+| Phát hiện câu hỏi dành cho đội mình | ✅ Đã chạy thật | Bỏ qua câu hỏi cho đội khác và các mảnh câu bị cắt dở |
+| Popup "Câu hỏi mới từ BTC": **Trả lời** / **Skip**, có tiếng "ting" | ✅ Đã chạy thật | Không tốn tiền trước khi bạn bấm Trả lời |
+| Đánh số câu hỏi "Câu 1, 2, 3" | ✅ | Câu mới nhất ở trên; số không đổi khi xóa câu khác |
+| Hỏi lại khi câu hỏi nghe không rõ | ✅ | Bạn sửa lại câu hỏi rồi xác nhận |
+| Gợi ý trả lời có trích dẫn tài liệu | ✅ Đã chạy thật | Haiku soạn nháp nhanh; "Soạn kỹ hơn" dùng Sonnet |
+| Chọn model trả lời: Haiku / Sonnet / Opus | ✅ | Chọn riêng cho từng hội nghị |
+| Popup "Đã có gợi ý trả lời" (tự ẩn sau 5 giây) | ✅ | |
+| Nút X xóa câu hỏi, dòng transcript, ẩn cột | ✅ | |
+| Transcript tự lưu, sửa, dịch lại, đánh dấu ★ | ✅ | |
+| Xuất PDF tiếng Việt | ✅ | Đủ dấu (nhúng font Be Vietnam Pro); API còn hỗ trợ Markdown / TXT |
+| Nhiều người cùng xem một phiên | ✅ | Chi phí AI không tăng theo số người xem |
+| Dùng trên điện thoại cùng mạng (LAN + HTTPS) | ✅ | Xem [Nghe bản dịch trên iPhone](#nghe-bản-dịch-trên-iphone) |
+| Theo dõi chi phí, trần chi phí cứng | ✅ | |
+| Chặn im lặng (VAD), báo cáo tổng hợp sau hội nghị, xuất DOCX | ❌ Chưa làm | |
 
 ---
 
@@ -62,339 +68,271 @@ dịch sang **tiếng Việt** sau khoảng 1–2 giây, lưu toàn bộ transcr
 ```
 Thiết bị thu âm (trình duyệt)
   micro / USB interface / âm thanh tab
-  └─ AudioWorklet → PCM16 16 kHz, khung 100 ms ── WebSocket nhị phân ──┐
-                                                                     ▼
+  └─ AudioWorklet → PCM16 16 kHz, khung 100 ms ── WebSocket ──┐
+                                                             ▼
 Server Fastify ── LiveRoom (một phòng cho mỗi hội nghị)
-  ├─ Deepgram streaming: kết quả tạm thời + kết quả đã chốt, ngôn ngữ, người nói
-  ├─ Bộ ghép câu: gom các mẩu đã chốt thành câu hoàn chỉnh
-  ├─ Lưu câu vào database ngay lập tức
-  ├─ Claude Haiku dịch tiếng Việt (tối đa 3 câu cùng lúc, có ngữ cảnh + glossary)
-  ├─ Phát hiện câu hỏi → Claude Sonnet soạn câu trả lời từ tài liệu (có trích dẫn)
-  └─ Phát mọi sự kiện tới WebSocket của từng người xem
-Giao diện Next.js ── /api/* được proxy sang server (cookie phiên cùng nguồn)
+  ├─ Deepgram: chữ tạm thời + câu đã chốt
+  ├─ Ghép câu → lưu database → Claude Haiku dịch tiếng Việt (có glossary)
+  ├─ Claude Haiku phát hiện câu hỏi:
+  │    câu hỏi cho đội khác / mảnh câu dở  → bỏ qua
+  │    nghe không rõ                       → chờ bạn sửa và xác nhận
+  │    câu hỏi rõ                          → popup "Trả lời / Skip"
+  ├─ Bấm Trả lời → Claude soạn câu trả lời từ tài liệu (có trích dẫn)
+  └─ Phát mọi sự kiện tới tất cả người đang xem
+Giao diện Next.js ── /api/* được chuyển tiếp sang server
 ```
 
-Một vài nguyên tắc thiết kế:
+Nguyên tắc chính:
 
-- **Một luồng âm thanh cho mỗi hội nghị.** Chỉ thiết bị đang thu âm gửi audio lên; server xử lý một lần rồi phát cho
-  mọi người xem. Chi phí AI tính theo giờ hội nghị, không tăng theo số người xem.
-- **Tạm thời và đã chốt.** Chữ đang nghe hiện in nghiêng và không được lưu. Chỉ câu đã chốt mới được lưu và dịch, nên
-  bản dịch không bị nhảy chữ liên tục.
-- **Chịu lỗi.**
-  - Mất mạng: trình duyệt giữ tối đa 2 phút âm thanh rồi gửi bù khi có mạng lại.
-  - Deepgram kết nối lại: server giữ 30 giây âm thanh trong lúc chờ.
-  - Thiết bị thu âm mất kết nối: có 90 giây để quay lại trước khi phiên tự tạm dừng.
-  - Server khởi động lại: các phiên bị treo được đóng sạch.
-- **Mốc thời gian theo đồng hồ phiên.** Không tính theo lượng audio đã gửi, nên khi tạm dừng hay ngắt quãng, giờ hiển
-  thị vẫn khớp với thực tế.
+- **Một luồng âm thanh cho mỗi hội nghị.** Chỉ một thiết bị thu âm; server xử lý một lần rồi phát cho mọi người xem.
+- **Chỉ lưu câu đã chốt.** Chữ đang nghe hiện in nghiêng, không lưu và không dịch, nên bản dịch không nhảy chữ.
+- **Không bịa câu trả lời.** Câu trả lời chỉ dựa vào tài liệu đã tải lên. Nếu tài liệu không có thông tin, app ghi rõ
+  phần còn thiếu thay vì tự nghĩ ra.
+- **Chịu lỗi.** Mất mạng thì trình duyệt giữ tối đa 2 phút âm thanh rồi gửi bù. Deepgram kết nối lại thì server giữ
+  30 giây âm thanh. Thiết bị thu âm có 90 giây để quay lại trước khi phiên tự tạm dừng.
+- **Không lưu audio.** Chỉ lưu văn bản.
 
 ---
 
-## Yêu cầu hệ thống
+## Cài đặt và chạy trên máy
 
-- **Node.js 20 trở lên** (đã thử trên Node 26), kèm npm.
-- **Trình duyệt Chrome hoặc Edge.** Trình duyệt chỉ cho thu âm khi trang chạy trên `localhost` hoặc HTTPS.
-- **API key:**
-  - [Deepgram](https://console.deepgram.com): nhận dạng giọng nói. Bắt buộc để thu âm.
-  - [Anthropic](https://console.anthropic.com): dịch và gợi ý trả lời. Bắt buộc để dịch.
-  > Gói **Claude Pro** trên claude.ai **không** đi kèm API key. API key tạo riêng ở console.anthropic.com và tính tiền riêng theo lượng dùng.
-- Không cần cài Docker hay PostgreSQL khi chạy trên máy cá nhân: server dùng **PGlite** (PostgreSQL chạy nhúng, dữ
-  liệu lưu ở `data/pglite`).
-- **Tùy chọn:** `ffmpeg`, chỉ cần khi muốn chuyển file ghi âm để chạy benchmark chất lượng.
+### Yêu cầu
 
----
+- **Node.js 22 trở lên**, kèm npm.
+- **Chrome hoặc Edge** trên máy tính; **Safari** trên iPhone. Trình duyệt chỉ cho thu âm trên `localhost` hoặc HTTPS.
+- **API key** (tạo riêng, tính tiền theo lượng dùng):
+  - [Deepgram](https://console.deepgram.com): nhận dạng giọng nói.
+  - [Anthropic](https://console.anthropic.com): dịch, phát hiện câu hỏi, gợi ý trả lời.
+    Gói Claude Pro trên claude.ai **không** đi kèm API key.
+- Không cần cài PostgreSQL: khi chạy trên máy, server dùng **PGlite** (dữ liệu lưu ở `data/pglite`).
 
-## Cài đặt và chạy lần đầu
-
-### 1. Tải code và cài thư viện
+### Các bước
 
 ```bash
 git clone https://github.com/Celinatrix/conference-copilot.git
 cd conference-copilot
 npm install
+cp .env.example .env          # PowerShell: Copy-Item .env.example .env
 ```
 
-### 2. Tạo file cấu hình
-
-```bash
-cp .env.example .env
-```
-
-Trên Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Mở `.env` và điền hai dòng sau. Đừng gửi nội dung file này cho ai, và đừng commit nó (`.gitignore` đã chặn sẵn).
+Mở `.env` và điền hai key. **Không gửi file này cho ai và không commit nó** (`.gitignore` đã chặn sẵn).
 
 ```ini
 DEEPGRAM_API_KEY=...
 ANTHROPIC_API_KEY=...
 ```
 
-Chưa có key vẫn chạy được app: giao diện, đăng nhập, quản lý hội nghị đều dùng được. Phần thu âm và dịch sẽ báo
-"chưa cấu hình key" thay vì lỗi khó hiểu.
-
-### 3. Chạy server và giao diện (hai cửa sổ terminal)
+Chạy server và giao diện ở hai cửa sổ terminal:
 
 ```bash
-npm run dev:server
+npm run dev:server     # API + WebSocket: http://127.0.0.1:4000
+npm run dev:web        # Giao diện:       http://localhost:3000
 ```
 
-```bash
-npm run dev:web
-```
+Mở http://localhost:3000 và bấm **Đăng ký**. Tài khoản đầu tiên là **Owner**; sau đó muốn thêm người thì vào
+**Cài đặt → Thành viên & lời mời** để tạo link mời (mỗi link dùng một lần, chỉ hiện một lần).
 
-- **API và WebSocket:** `http://127.0.0.1:4000`. Lần chạy đầu tự tạo database và chạy migration.
-- **Giao diện:** http://localhost:3000
-
-Cả hai server chỉ lắng nghe trên `127.0.0.1`, nên máy khác trong cùng Wi-Fi không truy cập được.
-
-### 4. Tạo tài khoản Owner
-
-Mở http://localhost:3000 → **Đăng ký**. **Tài khoản đầu tiên** trở thành **Owner** của workspace. Sau đó đăng ký công
-khai tự động đóng lại.
-
-### 5. Mời thành viên
-
-Vào **Cài đặt & Âm thanh → Thành viên & lời mời**:
-
-1. Chọn vai trò: **Thành viên**, hoặc **Admin** (chỉ Owner mới mời được Admin).
-2. Có thể giới hạn link chỉ cho một email, và chọn thời hạn 1–14 ngày.
-3. Bấm **Tạo link mời** rồi gửi link cho người được mời.
-   - Link **chỉ hiện một lần**. Nếu làm mất, hãy thu hồi và tạo link mới.
-   - Mỗi link chỉ dùng được **một lần**.
-   - Workspace tối đa 25 chỗ, tính cả lời mời đang chờ.
+Chưa có key vẫn mở được app; phần thu âm và dịch sẽ báo "chưa cấu hình key".
 
 ---
 
 ## Hướng dẫn sử dụng
 
-### Tạo hội nghị
+### 1. Tạo hội nghị
 
-Ở Dashboard, bấm **Bắt đầu hội nghị mới** rồi điền:
+Ở Dashboard bấm **Bắt đầu hội nghị mới**:
 
-- **Ngôn ngữ đầu vào:** để *Tự động nhận diện* khi có nhiều ngôn ngữ. Nếu cả buổi chỉ dùng một ngôn ngữ, chọn đúng
-  ngôn ngữ đó để nhận dạng chính xác hơn.
-- **Quyền riêng tư:**
-  - *Riêng tư:* chỉ bạn thấy, kể cả Owner cũng không thấy.
-  - *Chia sẻ với workspace:* mọi thành viên được xem; Owner và Admin được quản lý.
-- **Glossary:** mỗi dòng một thuật ngữ, theo dạng `thuật ngữ` (giữ nguyên khi dịch) hoặc `thuật ngữ = cách dịch`.
-  Dòng bắt đầu bằng `#` là ghi chú. Ví dụ:
+- **Ngôn ngữ đầu vào:** chọn **English** nếu cả buổi nói tiếng Anh (chính xác hơn chế độ tự nhận diện).
+- **Glossary:** mỗi dòng một thuật ngữ, dạng `thuật ngữ` (giữ nguyên) hoặc `thuật ngữ = cách dịch`. Dòng bắt đầu bằng
+  `#` là ghi chú. Nên thêm tên riêng hay bị nghe nhầm, ví dụ:
 
   ```text
-  # Actuarial
-  IBNR
+  # Tên riêng
+  Gen Re
+  InsuNovate
+  UEH
+  # Thuật ngữ
   loss ratio = tỷ lệ tổn thất
-  chain ladder = phương pháp chain ladder
+  reinsurance = tái bảo hiểm
   ```
 
-### Chọn nguồn âm thanh tại hội trường
+### 2. Tải tài liệu
 
-Xếp theo chất lượng, từ tốt nhất:
+Ở cột **Trợ lý trả lời**, tải lên báo cáo, slide, kịch bản (PDF, DOCX, PPTX, XLSX, CSV). Đây là nguồn duy nhất app dùng
+để soạn câu trả lời. PDF scan (ảnh chụp, không chọn được chữ) chưa đọc được.
 
-1. **Dây line-out từ bàn mixer** của ban kỹ thuật, cắm vào USB audio interface, rồi vào laptop. Âm sạch nhất.
-2. **Micro cài áo hoặc micro USB** đặt gần loa hoặc bục diễn giả.
-3. **Micro laptop hoặc điện thoại** ở ghế ngồi. Dễ bị vang, độ chính xác thấp hơn.
-4. **Âm thanh tab** (cho hội nghị online): chọn tab đang phát rồi bật "Chia sẻ âm thanh". Chỉ chạy trên Chrome/Edge;
-   trên macOS chỉ chia sẻ được âm thanh của tab.
+### 3. Chọn nguồn âm thanh
 
-Kiểm tra micro trước buổi họp ở **Cài đặt → Kiểm tra micro**. Âm thanh chỉ được đo ngay trên máy, không gửi đi đâu.
+Tốt nhất là dây line-out từ bàn mixer qua USB audio interface; tiếp theo là micro USB hoặc micro cài áo đặt gần loa;
+micro laptop hoặc điện thoại dễ bị vang hơn. Kiểm tra trước ở **Cài đặt → Kiểm tra micro**.
 
-### Trong phiên live
+### 4. Trong phiên live
 
-- **Start Listening:** chọn nguồn âm thanh và xác nhận bạn được phép ghi âm. App **không lưu audio thô**, chỉ lưu văn bản.
-- **Pause / Resume / Stop Session.** Có thể bắt đầu nhiều phiên trong cùng một hội nghị (ví dụ hội nghị kéo dài nhiều ngày).
-- **Bố cục:** cột trái là bản gốc, cột giữa là tiếng Việt. Trên điện thoại, các cột chuyển thành tab.
-- **Chữ:** **A− / A+** chỉnh cỡ chữ (14–48 px). **Chế độ chữ lớn** chỉ hiện bản dịch. **⛶** bật toàn màn hình. Màn
-  hình được giữ sáng khi đang thu âm hoặc đang xem phiên live.
-- **Sửa nội dung:** rê chuột vào một câu để sửa chỗ nhận dạng sai, bấm **Dịch lại**, hoặc bấm **★** để đánh dấu quan trọng.
-- **Tìm kiếm:** ô tìm kiếm tra theo cả bản gốc lẫn bản dịch.
-- **Export:** Markdown hoặc văn bản, chọn xuất cả hai ngôn ngữ, chỉ tiếng Việt, hoặc chỉ bản gốc. **Copy Translation**
-  sao chép toàn bộ bản dịch.
-- **Nhiều thiết bị:** thiết bị khác của cùng người hoặc của thành viên khác chỉ cần mở hội nghị là xem được bản dịch
-  trực tiếp. Mỗi lúc chỉ một thiết bị được thu âm.
+- **Start Listening:** chọn micro và xác nhận được phép ghi âm. Có **Pause / Resume / Stop**.
+- **Bố cục:** cột bản gốc, cột tiếng Việt, cột Trợ lý trả lời. Bấm **X** để ẩn cột không cần. Trên điện thoại các cột
+  chuyển thành tab.
+- **Đọc tiếng Việt qua tai nghe:** bấm **🔈** để nghe bản dịch bằng giọng nữ. Nếu thiết bị không có giọng nữ tiếng
+  Việt, app im lặng chứ không dùng giọng nam.
+- **Chữ:** **A− / A+** chỉnh cỡ chữ, **Chế độ chữ lớn** chỉ hiện bản dịch, **⛶** toàn màn hình. Màn hình được giữ sáng.
+- **Sửa transcript:** rê chuột vào một câu để sửa, **Dịch lại**, **★** đánh dấu, hoặc **X** xóa dòng.
+- **Xuất PDF:** bấm **Export PDF** để tải transcript tiếng Việt.
 
 ---
 
-## Nghe bản dịch qua tai nghe trên iPhone (kể cả khi tắt màn hình)
+## Câu hỏi và gợi ý trả lời
 
-Laptop thu âm giọng diễn giả, dịch, rồi **tự đọc bản dịch tiếng Việt thành một luồng âm thanh** (như đài radio online). iPhone phát luồng đó như phát nhạc nên **khóa màn hình vẫn nghe được**.
+Luồng xử lý một câu hỏi của giám khảo:
 
-### Cách A: laptop thu âm, iPhone nghe (khóa màn hình vẫn nghe được)
+1. **App nghe thấy câu hỏi.** Claude Haiku kiểm tra:
+   - câu hỏi có dành cho **đội đang thuyết trình** không (câu hỏi cho đội khác bị bỏ qua);
+   - có phải chỉ là **mảnh câu bị cắt dở** không (mảnh cũ tự bị xóa khi câu đầy đủ xuất hiện);
+   - có **nghe rõ** không.
+2. **Câu hỏi rõ:** popup **"🔔 Câu N · Câu hỏi mới từ BTC"** hiện giữa màn hình kèm tiếng "ting". Popup **không tự
+   tắt**, bạn phải chọn:
+   - **Trả lời:** app bắt đầu soạn gợi ý (Haiku mất khoảng 8 giây);
+   - **Skip:** bỏ câu hỏi, không tốn tiền;
+   - **Sửa lại câu hỏi:** sửa chữ nếu app nghe sai, rồi mới soạn.
+3. **Câu hỏi nghe không rõ:** hiện thẻ **xác nhận** trong cột Trợ lý, kèm lý do. Bạn sửa lại rồi bấm xác nhận.
+4. **Có gợi ý:** popup **"💡 Câu N · Đã có gợi ý trả lời"** hiện 5 giây. Mỗi gợi ý có bản tiếng Việt, bản tiếng Anh để
+   nói, và trích dẫn trang/phần trong tài liệu.
+5. **Muốn câu trả lời kỹ hơn:** bấm **✨ Soạn kỹ hơn (Sonnet)** trên thẻ câu hỏi.
 
-#### Chuẩn bị một lần trên laptop
-1. **Giọng đọc tiếng Việt cho Windows:** Settings → Time & Language → Speech → *Manage voices* → **Add voices** → chọn **Vietnamese** → Add. Chờ tải xong (giọng "Microsoft An"). Sau đó khởi động lại server.
-2. **Nhận iPhone qua dây USB:** cài **Apple Devices** (Microsoft Store) hoặc **iTunes**. Cắm iPhone, bấm "Tin cậy máy tính này" trên iPhone.
+Câu hỏi được đánh số **Câu 1, 2, 3…** theo thứ tự được hỏi; câu mới nhất ở trên cùng. Xóa một câu (nút **X**) không
+làm đổi số các câu còn lại.
 
-#### Mỗi lần dùng
-1. iPhone: Cài đặt → **Điểm truy cập cá nhân** → bật **Cho phép người khác kết nối**. Cắm dây vào laptop; laptop sẽ có mạng qua iPhone.
-2. Laptop chạy chế độ LAN:
+**Chọn model trả lời** cho từng hội nghị (ước tính mỗi câu):
+
+| Model | Đặc điểm | Chi phí |
+| --- | --- | --- |
+| Haiku 5.5 (mặc định) | Nhanh, rẻ nhất | ~$0.002 |
+| Sonnet 5.5 | Lập luận chặt hơn | ~$0.08 |
+| Opus 5.5 | Tốt nhất, chậm hơn | ~$0.15 |
+
+Muốn app tự soạn trả lời ngay mà không cần bấm, đặt `ANSWER_REQUIRE_CONFIRM=false` trong `.env`.
+
+Bạn cũng có thể **tự gõ câu hỏi** ở cột Trợ lý để hỏi về tài liệu.
+
+---
+
+## Nghe bản dịch trên iPhone
+
+**Hạn chế của iOS:** khi Safari đang dùng micro, mọi âm thanh của trang đều phát ra **loa ngoài**, không vào tai nghe.
+Vì vậy cách nên dùng là:
+
+> **Laptop (hoặc thiết bị khác) thu âm, iPhone chỉ để nghe và xem.**
+
+### Cách 1: dùng bản đám mây (đơn giản nhất)
+
+1. Laptop mở web Vercel, đăng nhập, mở hội nghị, bấm **Start Listening**.
+2. iPhone mở **Safari** (không mở trong Zalo hay Messenger) tới cùng địa chỉ, đăng nhập cùng tài khoản hoặc tài khoản
+   cùng workspace, mở cùng hội nghị.
+3. Cắm tai nghe vào iPhone, bấm **🔈 Đọc tiếng Việt qua tai nghe**. Giữ màn hình sáng (giảm độ sáng xuống thấp nhất).
+
+### Cách 2: chạy trên laptop, iPhone vào qua mạng LAN
+
+1. Nối iPhone và laptop chung mạng (cùng Wi-Fi, hoặc iPhone bật **Điểm truy cập cá nhân** rồi cắm dây USB).
+2. Trên laptop chạy:
+
    ```bash
    npm run dev:server:lan
    npm run dev:web:lan
+   npm run dev:https        # chỉ cần khi iPhone phải tự thu âm hoặc cần HTTPS
    ```
-3. Laptop: `ipconfig` → tìm **IPv4 Address** của kết nối "Apple Mobile Device Ethernet" (thường là `172.20.10.x`).
-4. iPhone mở **Safari** → `http://172.20.10.x:3000` → đăng nhập → mở hội nghị.
-   *Tùy chọn:* nút Chia sẻ → **Thêm vào MH chính** để có biểu tượng app "Copilot".
-5. Cắm tai nghe vào iPhone, bấm **🎧 Nghe khi tắt màn hình**, rồi **Thử tiếng** để nghe câu thử.
-6. Laptop bấm **Start Listening**. Giờ có thể khóa màn hình iPhone.
 
-Lưu ý:
-- Nếu khi khóa màn hình mà âm thanh dừng trong **app ở màn hình chính**, hãy dùng **tab Safari** thay vì app: iOS xử lý âm thanh nền của tab Safari ổn định hơn.
-- Âm thanh trễ hơn chữ trên màn hình vài giây (dịch + đọc + bộ đệm của iPhone). Nếu đọc chậm hơn diễn giả quá 15 giây, các câu cũ bị bỏ để luôn đọc câu mới nhất.
-- Tốc độ đọc: `TTS_RATE` trong `.env` (mặc định 1.1), khởi động lại server để áp dụng.
-- Nút **🔈 Đọc tiếng Việt qua tai nghe** (đọc ngay trong trình duyệt) vẫn còn, nhưng chỉ chạy khi màn hình sáng.
-- Chế độ LAN mở app cho mọi máy cùng mạng (vẫn phải đăng nhập). Dùng xong thì quay lại `npm run dev:server` / `npm run dev:web`.
+3. Lấy IP của laptop bằng `ipconfig` (với dây USB thường là `172.20.10.x`).
+4. iPhone mở Safari tới `http://<IP-laptop>:3000`, hoặc `https://<IP-laptop>:3443` khi chạy `dev:https`.
+   - Lần đầu dùng HTTPS: mở `http://<IP-laptop>:3080` → **Tải chứng chỉ** → cài hồ sơ → **Cài đặt chung → Giới thiệu →
+     Cài đặt tin cậy chứng nhận** → bật **Conference Copilot Local CA**.
+   - Thư mục `certs/` chứa khóa riêng của chứng chỉ: **không gửi `certs/ca.key` cho ai**.
 
-### Cách B: iPhone tự thu âm qua micro tai nghe (màn hình phải sáng)
+Chế độ LAN mở app cho mọi máy cùng mạng (vẫn phải đăng nhập). Dùng xong thì quay lại `npm run dev:server` /
+`npm run dev:web`.
 
-Safari chỉ cho dùng micro trên trang **HTTPS**, và **tắt micro khi khóa màn hình**. Vì vậy ở cách này màn hình iPhone phải sáng (giảm độ sáng xuống thấp nhất; app tự giữ màn hình không tắt). Muốn khóa màn hình thì dùng Cách A ở trên (laptop thu âm).
+**Nghe khi khóa màn hình:** server có luồng MP3 đọc bản dịch (nút **🎧**). Nút này chỉ hiện khi máy Windows chạy server
+có giọng đọc tiếng Việt **nữ**; Windows mặc định chỉ có giọng nam ("Microsoft An") nên nút thường bị ẩn.
 
-1. Kết nối iPhone với laptop như Cách A (USB + Điểm truy cập cá nhân), chạy `npm run dev:server:lan` và `npm run dev:web:lan`.
-2. Chạy thêm (cửa sổ terminal thứ ba):
-   ```bash
-   npm run dev:https
-   ```
-   Lần đầu, script tự tạo chứng chỉ trong thư mục `certs/` (đã có trong `.gitignore`; **không gửi `certs/ca.key` cho ai**). Script in ra hai địa chỉ.
-3. **Một lần duy nhất trên iPhone:** mở Safari tới `http://<IP-laptop>:3080` → **Tải chứng chỉ** → Cài đặt → **Đã tải về hồ sơ** → Cài đặt → rồi **Cài đặt chung → Giới thiệu → Cài đặt tin cậy chứng nhận** → bật **Conference Copilot Local CA**.
-4. Mở Safari tới `https://<IP-laptop>:3443`, đăng nhập, mở hội nghị.
-5. Cắm tai nghe có micro vào iPhone. Bấm **🔈 Đọc tiếng Việt qua tai nghe**, rồi **Start Listening** → chọn micro tai nghe → cho phép micro.
-6. Bản gốc và bản dịch hiện trên iPhone, đồng thời lưu lại; xem đầy đủ trên laptop (`http://localhost:3000`) bất cứ lúc nào.
-
-Nếu lỡ khóa màn hình, app báo "Micro đang bị tắt tiếng"; mở lại màn hình là thu tiếp. Micro tai nghe nằm sát miệng bạn nên thu giọng người khác trong phòng kém hơn micro laptop: hãy thử trước.
+---
 
 ## Cấu hình (.env)
 
-File `.env` ở thư mục gốc do **server** đọc. Các biến của **giao diện** (cuối bảng) phải đặt trong `web/.env.local`,
-vì Next.js chỉ đọc file env trong thư mục `web/`.
+File `.env` ở thư mục gốc do **server** đọc. Biến của giao diện (cuối bảng) đặt trong `web/.env.local` hoặc trong
+Environment Variables của Vercel.
 
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
 | `DEEPGRAM_API_KEY` | trống | Key nhận dạng giọng nói |
-| `DEEPGRAM_MODEL` | `nova-3` | Mô hình Deepgram. Chế độ tự nhận diện (`multi`) chỉ hỗ trợ một số ngôn ngữ |
-| `DEEPGRAM_USD_PER_MIN` | `0.0092` | Đơn giá dùng để **ước tính** chi phí; sửa theo gói Deepgram thực tế |
-| `ANTHROPIC_API_KEY` | trống | Key Claude cho dịch, phát hiện câu hỏi, gợi ý trả lời |
-| `TRANSLATION_MODEL` | `claude-haiku-5-5` | Mô hình dịch (cũng dùng để phát hiện câu hỏi) |
-| `TRANSLATION_INPUT_USD_PER_MTOK` / `_OUTPUT_` | `0.10` / `0.50` | Đơn giá ước tính cho mô hình dịch |
-| `ANSWER_MODEL` | `claude-sonnet-5-5` | Mô hình soạn câu trả lời |
-| `ANSWER_INPUT_USD_PER_MTOK` / `_OUTPUT_` / `_CACHE_READ_` / `_CACHE_WRITE_` | `2` / `10` / `0.2` / `2.5` | Đơn giá ước tính cho mô hình trả lời |
-| `ANSWER_AUTO_BUDGET_USD` | `1` | Quá mức này trong một hội nghị thì ngừng tự gợi ý, chuyển sang bấm mới gợi ý |
-| `AI_CONFERENCE_CAP_USD` | `10` | Trần cứng cho mọi chi phí AI của một hội nghị (`0` = tắt) |
-| `AI_WORKSPACE_DAILY_CAP_USD` | `25` | Trần cứng cho chi phí AI của workspace trong 24 giờ (`0` = tắt) |
-| `AI_QUESTIONS_PER_MINUTE` | `10` | Số yêu cầu gợi ý trả lời tối đa mỗi phút cho một người |
-| `AI_RETRANSLATE_PER_MINUTE` | `15` | Số lần dịch lại tối đa mỗi phút cho một người |
-| `LOW_CONFIDENCE_THRESHOLD` | `0.75` | Câu có độ tin cậy nhận dạng dưới mức này bị gắn cờ "nghe chưa rõ" |
-| `PORT` / `HOST` | `4000` / `127.0.0.1` | Địa chỉ server API |
-| `ALLOWED_ORIGINS` | `http://localhost:3000` | Origin trình duyệt được phép gọi API và mở WebSocket (phân cách bằng dấu phẩy) |
-| `COOKIE_SECURE` | `false` | Đặt `true` khi chạy sau HTTPS |
-| `TRUST_PROXY` | `loopback` | Proxy nào được tin header `X-Forwarded-For`. Không bao giờ đặt `true` |
-| `ALLOW_SIGNUP` | `false` | Bật đăng ký công khai. Chỉ dùng trong mạng kín tin cậy |
-| `REGISTER_PER_HOUR` | `5` | Số lần thử đăng ký tối đa mỗi giờ cho một IP |
-| `DATABASE_URL` | trống | Để trống thì dùng PGlite. Production: `postgres://user:pass@host:5432/copilot` |
-| `PGLITE_DIR` | `./data/pglite` | Thư mục dữ liệu PGlite |
-| `LOG_LEVEL` | `info` | Mức log của server |
-| `API_ORIGIN` *(web/.env.local)* | `http://127.0.0.1:4000` | Nơi Next.js chuyển tiếp `/api/*` |
-| `NEXT_PUBLIC_WS_URL` *(web/.env.local)* | `ws(s)://<host hiện tại>:4000` | Địa chỉ WebSocket mà trình duyệt kết nối |
+| `DEEPGRAM_MODEL` | `nova-3` | Mô hình Deepgram |
+| `DEEPGRAM_USD_PER_MIN` | `0.0092` | Đơn giá để **ước tính** chi phí |
+| `ANTHROPIC_API_KEY` | trống | Key Claude |
+| `TRANSLATION_MODEL` | `claude-haiku-5-5` | Mô hình dịch và phát hiện câu hỏi |
+| `ANSWER_REQUIRE_CONFIRM` | `true` | Chờ bạn bấm Trả lời / Skip trước khi soạn. `false` = tự soạn ngay |
+| `ANSWER_FAST_MODEL` | `claude-haiku-5-5` | Mô hình soạn nháp nhanh |
+| `ANSWER_MODEL` | `claude-sonnet-5-5` | Mô hình cho nút "Soạn kỹ hơn" |
+| `*_USD_PER_MTOK` | xem `.env.example` | Đơn giá ước tính cho từng mô hình |
+| `ANSWER_AUTO_BUDGET_USD` | `1` | Chi cho trả lời vượt mức này trong một hội nghị thì chuyển sang chờ bấm |
+| `AI_CONFERENCE_CAP_USD` | `10` | Trần chi phí AI cho một hội nghị (`0` = tắt) |
+| `AI_WORKSPACE_DAILY_CAP_USD` | `25` | Trần chi phí AI cho workspace trong 24 giờ (`0` = tắt) |
+| `AI_QUESTIONS_PER_MINUTE` / `AI_RETRANSLATE_PER_MINUTE` | `10` / `15` | Giới hạn mỗi người mỗi phút |
+| `LOW_CONFIDENCE_THRESHOLD` | `0.75` | Dưới mức này câu bị gắn cờ "nghe chưa rõ" |
+| `TTS_LANG` / `TTS_RATE` | `vi` / `1.1` | Ngôn ngữ và tốc độ của luồng MP3 đọc bản dịch |
+| `PORT` / `HOST` | `4000` / `127.0.0.1` | Địa chỉ server. Trên Railway đặt `HOST=0.0.0.0` |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | Địa chỉ web được phép gọi API (phân cách bằng dấu phẩy) |
+| `COOKIE_SECURE` | `false` | `true` khi chạy HTTPS |
+| `TRUST_PROXY` | `loopback` | Proxy được tin header `X-Forwarded-For`. Trên Railway đặt `2` |
+| `ALLOW_SIGNUP` / `REGISTER_PER_HOUR` | `false` / `5` | Đăng ký công khai và giới hạn đăng ký mỗi IP |
+| `DATABASE_URL` | trống | Trống = PGlite. Production: chuỗi kết nối PostgreSQL |
+| `PGLITE_DIR` / `LOG_LEVEL` | `./data/pglite` / `info` | |
+| `API_ORIGIN` *(web)* | `http://127.0.0.1:4000` | Nơi Next.js chuyển tiếp `/api/*` |
+| `NEXT_PUBLIC_WS_URL` *(web)* | `ws(s)://<host>:4000` | Địa chỉ WebSocket trình duyệt kết nối |
 
-Sau khi sửa `.env`, khởi động lại `npm run dev:server`.
+Sửa `.env` xong thì khởi động lại server.
 
 ---
 
 ## Chi phí và giới hạn
 
-- **Ước tính** khoảng **$1–2 mỗi giờ hội nghị** cho cả nhóm, gồm nhận dạng giọng nói, dịch và vài chục câu hỏi. Chi phí
-  không tăng theo số người xem. Đây là ước tính từ bảng giá, **chưa đo với hóa đơn thật**.
-- Mỗi hội nghị có ô **Chi phí ước tính** (cột Công cụ phiên). Số liệu tính từ đơn giá trong `.env`; số chính xác hãy xem
-  trên trang billing của Deepgram và Anthropic.
-- **Trần cứng:** khi hội nghị hoặc workspace chạm trần, app từ chối mở phiên nghe mới, phát hiện câu hỏi, gợi ý trả lời
-  và dịch lại. **Phiên đang chạy vẫn dịch tiếp**, để không cắt ngang diễn giả.
-- **Giới hạn khác:**
-  - Toàn API: 300 request/phút mỗi người.
-  - Tạo hội nghị: 20/phút. Upload tài liệu: 10/phút. Tạo lời mời: 20/giờ. Đăng ký: 5/giờ mỗi IP.
-  - Tài liệu: tối đa 25 MB mỗi file, 2 triệu ký tự sau khi trích xuất; mỗi hội nghị tối đa 10 triệu ký tự.
+- **Ước tính** khoảng **$1–2 mỗi giờ** hội nghị, gồm nhận dạng giọng nói, dịch và vài chục câu hỏi (trả lời bằng
+  Haiku). Số chính xác xem trên trang billing của Deepgram và Anthropic.
+- Ô **Chi phí ước tính** trong mỗi hội nghị tính theo đơn giá trong `.env`.
+- Câu hỏi bị **Skip** hoặc bị bỏ qua (cho đội khác, mảnh câu dở) **không tốn tiền soạn trả lời**.
+- **Trần cứng:** chạm trần thì app không mở phiên mới, không soạn trả lời và không dịch lại; phiên đang chạy vẫn dịch
+  tiếp để không cắt ngang người nói.
+- **Giới hạn khác:** 300 request/phút mỗi người; tài liệu tối đa 25 MB mỗi file (**4,5 MB** khi đi qua Vercel), 2 triệu
+  ký tự sau khi trích xuất; mỗi hội nghị tối đa 10 triệu ký tự.
 
 ---
 
 ## Bảo mật
 
-Đã qua một đợt kiểm toán bảo mật, gồm 38 bài tấn công thử có thể chạy lại. Kết quả hiện tại: **0 lỗ hổng High,
-2 Medium, 6 Low**.
+- Mật khẩu băm scrypt; token phiên lưu dạng hash; cookie `HttpOnly` + `SameSite=Lax`, hết hạn sau 30 ngày.
+- Mọi route (trừ health, đăng nhập/đăng ký, tra cứu lời mời) cần đăng nhập; quyền kiểm tra trên **từng bản ghi**.
+- Mọi đầu vào qua schema; SQL luôn tham số hóa; request thay đổi dữ liệu phải có `Origin` hợp lệ.
+- WebSocket dùng vé một lần (60 giây), kiểm tra Origin, giới hạn 64 KB mỗi frame.
+- Upload kiểm tra chữ ký file, chặn bom giải nén, phân tích trong worker riêng (512 MB RAM, 30 giây); file gốc không
+  được ghi ra đĩa.
+- API key chỉ nằm ở server. Có audit log cho đăng nhập, upload, xuất file, sửa transcript, mời thành viên.
+- Audio không bao giờ được lưu. Nội dung transcript và tài liệu được xử lý như dữ liệu, không phải chỉ thị cho AI.
 
-**Đang có:**
-
-- **Mật khẩu và phiên:** mật khẩu băm scrypt. Token phiên lưu dạng hash, cookie `HttpOnly` + `SameSite=Lax`, hết hạn
-  sau 30 ngày. Đăng xuất là vô hiệu phiên ngay ở server.
-- **Phân quyền:** mọi route (trừ health, đăng nhập/đăng ký, tra cứu lời mời) đều yêu cầu đăng nhập. Quyền được kiểm tra
-  trên **từng bản ghi** ở backend (đã thử 16 kiểu truy cập chéo, đều bị chặn).
-- **Đầu vào và CSRF:** mọi đầu vào (body, query, tin nhắn WebSocket) đều qua schema. Query SQL luôn tham số hóa. Không
-  thể tự sửa các trường như `role`, `workspace_id`, `status`. Request thay đổi dữ liệu mà mang cookie phải có header
-  `Origin` hợp lệ.
-- **WebSocket:** dùng vé một lần, hết hạn sau 60 giây, có kiểm tra Origin và giới hạn 64 KB mỗi frame.
-- **Upload:**
-  - Chỉ nhận PDF, DOCX, PPTX, XLSX, CSV, và kiểm tra cả chữ ký file chứ không chỉ đuôi.
-  - Chặn bom giải nén ngay từ danh mục ZIP. File được phân tích trong worker riêng, giới hạn 512 MB RAM và 30 giây.
-  - File gốc không bao giờ được ghi ra đĩa hay thực thi.
-- **Lời mời:** dùng một lần, có hạn, có thể giới hạn theo email; database chỉ lưu hash của token.
-- **Chống dò email:** không lộ email nào đã đăng ký, cả qua thông báo lỗi lẫn qua thời gian phản hồi.
-- **API key và nhật ký:** API key chỉ nằm ở server. Có audit log cho đăng nhập, upload, xuất file, sửa transcript và
-  mời thành viên.
-- **Quyền riêng tư:** audio không bao giờ được lưu. Xóa hội nghị là xóa toàn bộ transcript, tài liệu và câu hỏi của nó.
-  Nội dung transcript và tài liệu được xử lý như dữ liệu, không phải chỉ thị cho AI (chống prompt injection).
-
-**Chưa xử lý (đợt tiếp theo):**
-
-- **WebSocket:** chưa đóng kết nối khi người dùng đăng xuất hoặc bị đổi quyền; chưa giới hạn số kết nối và tốc độ tin nhắn.
-- **Header:** chưa có CSP và HSTS.
-- **Mã hóa:** cookie `Secure` phải tự bật khi chạy HTTPS. Database PGlite **không mã hóa** trên đĩa; hãy bật BitLocker
-  cho ổ đĩa nếu máy chứa dữ liệu nhạy cảm.
-- **Chính sách lưu dữ liệu của bên thứ ba:** audio được gửi tới Deepgram; transcript, câu hỏi và đoạn tài liệu được gửi
-  tới Anthropic. Hãy kiểm tra hợp đồng và chính sách của hai bên trước khi dùng cho hội nghị mật.
+**Chưa xử lý:** WebSocket chưa đóng khi người dùng đăng xuất hay bị đổi quyền; chưa có CSP và HSTS; PGlite không mã hóa
+trên đĩa. Audio được gửi tới Deepgram, còn transcript và đoạn tài liệu được gửi tới Anthropic: kiểm tra chính sách hai
+bên trước khi dùng cho nội dung mật.
 
 ---
 
-## Kiểm thử, benchmark và kiểm tra bảo mật
+## Kiểm thử
 
 ```bash
-npm test
+npm run check                          # typecheck server + web, rồi chạy test
+npm test                               # 84 test của server (AI được giả lập, không tốn tiền)
+npm run bench:fanout -w server         # độ trễ phát tới 1/5/10/20 người xem
+cd server && npx tsx scripts/security-probe.ts   # 38 bài tấn công thử, in PASS/FAIL
 ```
 
-Chạy 71 test của server: unit test và test tích hợp REST/WebSocket trên PGlite chạy trong bộ nhớ, với AI được giả lập.
+`npm run bench:live -w server -- talk.wav --ref talk.txt` chạy một file ghi âm qua Deepgram và Claude thật để đo độ trễ
+và tỷ lệ lỗi từ. **Lệnh này tốn credit API.** File phải là WAV 16 kHz mono
+(`ffmpeg -i talk.mp3 -ar 16000 -ac 1 -c:a pcm_s16le talk.wav`).
 
-```bash
-npm run typecheck
-```
-
-Kiểm tra kiểu cho cả server và web.
-
-```bash
-npm run bench:fanout -w server
-```
-
-Đo độ trễ phân phối của server với 1/5/10/20 người xem, cùng thời gian tải và tìm kiếm cho một transcript 8 tiếng.
-Không gọi API ngoài.
-
-```bash
-npm run bench:live -w server -- talk.wav --ref talk.txt --glossary terms.txt --language multi
-```
-
-Phát một file ghi âm qua **Deepgram và Claude thật**, theo đúng tốc độ thật. Kết quả gồm độ trễ (p50/p95), tỷ lệ lỗi từ
-(WER) và tỷ lệ nghe đúng thuật ngữ, kèm một bảng chấm điểm bản dịch lưu trong `data/bench/`. **Lệnh này tốn credit API**,
-xấp xỉ độ dài file ghi âm. File phải là WAV 16 kHz mono; chuyển đổi trước bằng:
-
-```bash
-ffmpeg -i talk.mp3 -ar 16000 -ac 1 -c:a pcm_s16le talk.wav
-```
-
-Kiểm tra bảo mật (chạy trong thư mục `server/`):
-
-```bash
-npx tsx scripts/security-probe.ts
-```
-
-Chạy 38 bài tấn công thử trên một bản app dựng trong bộ nhớ, in PASS/FAIL kèm bằng chứng. Không gọi ra ngoài, không
-đụng tới dữ liệu thật. Lưu ý bài thử bom giải nén cần còn trống khoảng 2 GB RAM.
+GitHub Actions chạy typecheck, test và build cho mỗi pull request và mỗi lần đẩy lên `main`; Dependabot tự đề xuất cập nhật thư viện.
 
 ---
 
@@ -402,74 +340,62 @@ Chạy 38 bài tấn công thử trên một bản app dựng trong bộ nhớ, 
 
 ```
 conference-copilot/
-├─ .github/                     CI (typecheck + test + build) và Dependabot (cập nhật thư viện)
-├─ docs/DEPLOY.md               hướng dẫn triển khai Vercel + Railway
-├─ scripts/https-proxy.mjs      chế độ HTTPS trong mạng LAN (iPhone thu âm)
-├─ railway.json                 cấu hình chạy server trên Railway
-├─ server/                      API + WebSocket (Fastify, TypeScript)
-│  ├─ migrations/               SQL migration, tự chạy khi server khởi động
-│  ├─ scripts/                  bench-fanout, bench-live, security-probe
+├─ .github/                    CI và Dependabot
+├─ docs/DEPLOY.md              hướng dẫn triển khai Vercel + Railway
+├─ scripts/https-proxy.mjs     HTTPS trong mạng LAN (cho iPhone)
+├─ railway.json                cấu hình chạy server trên Railway
+├─ server/                     API + WebSocket (Fastify, TypeScript)
+│  ├─ migrations/              SQL migration, tự chạy khi server khởi động
+│  ├─ scripts/                 benchmark và kiểm tra bảo mật
 │  ├─ src/
-│  │  ├─ app.ts                 dựng app: plugin, hook bảo mật, rate limit, route, WebSocket
-│  │  ├─ config.ts              đọc .env
-│  │  ├─ db.ts                  PGlite / PostgreSQL + chạy migration
-│  │  ├─ auth.ts, access.ts     mật khẩu, phiên, vé WebSocket, quy tắc phân quyền, audit
-│  │  ├─ live/                  phiên realtime
-│  │  │  ├─ deepgram.ts         adapter Deepgram: kết nối lại, đệm, keep-alive
-│  │  │  ├─ assembler.ts        ghép các mẩu nhận dạng thành câu
-│  │  │  ├─ translator.ts       dịch streaming bằng Claude
-│  │  │  ├─ timeline.ts         đổi thời gian audio sang đồng hồ phiên
-│  │  │  └─ room.ts             điều phối phiên, lưu, phát sự kiện, hàng chờ dịch
-│  │  ├─ kb/                    Knowledge Base: đọc tài liệu, kiểm tra an toàn, worker, tìm kiếm
-│  │  ├─ ai/                    phát hiện câu hỏi, soạn trả lời có trích dẫn, cờ cảnh báo, trần chi phí
-│  │  ├─ tts/                   luồng giọng đọc MP3 (giọng Windows, chỉ chạy trên máy Windows)
-│  │  └─ routes/                REST: auth, conferences, documents, questions, workspace
-│  └─ test/                     vitest
-└─ web/                         giao diện (Next.js, React, Tailwind)
-   ├─ app/                      các trang: login, dashboard, hội nghị, live, cài đặt
-   ├─ components/               UI dùng chung, các dòng transcript, thành viên & lời mời
-   ├─ lib/                      gọi API, thu âm, WebSocket client, giữ màn hình sáng
-   └─ public/pcm-worklet.js     chuyển âm thanh sang 16 kHz PCM16 trên luồng audio
+│  │  ├─ app.ts, config.ts, db.ts, auth.ts, access.ts
+│  │  ├─ export-pdf.ts         xuất transcript ra PDF tiếng Việt
+│  │  ├─ live/                 Deepgram, ghép câu, dịch, đồng hồ phiên, phòng live
+│  │  ├─ kb/                   đọc tài liệu, kiểm tra an toàn, tìm đoạn liên quan
+│  │  ├─ ai/                   phát hiện câu hỏi, soạn trả lời có trích dẫn, trần chi phí
+│  │  ├─ tts/                  luồng MP3 đọc bản dịch (giọng Windows)
+│  │  └─ routes/               auth, conferences, documents, questions, listen, workspace
+│  └─ test/                    vitest
+└─ web/                        giao diện (Next.js 16, React 19, Tailwind 4)
+   ├─ app/                     trang đăng nhập, dashboard, hội nghị, cài đặt
+   ├─ components/live/         transcript, cột Trợ lý trả lời, luồng nghe
+   └─ lib/                     gọi API, thu âm, WebSocket, giọng đọc, tiếng "ting"
 ```
 
 ---
 
 ## API
 
-Tất cả nằm dưới `/api`, dữ liệu dạng JSON. Mọi route (trừ ghi chú khác) đều cần cookie phiên. Request thay đổi dữ liệu
-cần header `Origin` hợp lệ.
+Tất cả dưới `/api`, dạng JSON, cần cookie phiên (trừ khi ghi chú khác).
 
 | Method | Đường dẫn | Mô tả |
 | --- | --- | --- |
 | GET | `/api/health` | Kiểm tra sống (không cần đăng nhập) |
-| GET | `/api/system/status` | Trạng thái cấu hình key và mô hình |
-| POST | `/api/auth/register` | Đăng ký: tài khoản đầu tiên, hoặc kèm `invite` (không cần đăng nhập) |
-| POST | `/api/auth/login` · `/api/auth/logout` | Đăng nhập (không cần đăng nhập) / đăng xuất |
-| GET | `/api/auth/me` | Người dùng hiện tại và workspace |
-| GET | `/api/invites/:token` | Thông tin lời mời cho trang đăng ký (không cần đăng nhập, có rate limit) |
-| GET | `/api/workspace/members` | Danh sách thành viên |
-| GET / POST | `/api/workspace/invites` | Xem / tạo lời mời (Owner, Admin) |
-| DELETE | `/api/workspace/invites/:id` | Thu hồi lời mời |
-| GET | `/api/dashboard` | Hội nghị gần đây, phiên đang chạy, số liệu tổng |
-| GET / POST | `/api/conferences` | Danh sách (`?q=`) / tạo hội nghị |
-| GET / PATCH / DELETE | `/api/conferences/:id` | Chi tiết / sửa (kể cả `response_modes`) / xóa vĩnh viễn |
-| GET | `/api/conferences/:id/segments` | Transcript; lọc `?q=`, `?important=1`; đồng bộ bù `?since=` |
-| PATCH | `/api/segments/:id` | Sửa bản gốc / bản dịch, đánh dấu quan trọng |
+| GET | `/api/system/status` | Trạng thái key và mô hình |
+| POST | `/api/auth/register` · `/login` · `/logout` | Đăng ký / đăng nhập / đăng xuất |
+| GET | `/api/auth/me` | Người dùng hiện tại |
+| GET | `/api/invites/:token` | Thông tin lời mời (không cần đăng nhập) |
+| GET / POST / DELETE | `/api/workspace/members`, `/api/workspace/invites[/:id]` | Thành viên và lời mời |
+| GET | `/api/dashboard` | Hội nghị gần đây, số liệu tổng |
+| GET / POST | `/api/conferences` | Danh sách / tạo hội nghị |
+| GET / PATCH / DELETE | `/api/conferences/:id` | Chi tiết / sửa (kể cả `answer_model`, `response_modes`) / xóa |
+| GET | `/api/conferences/:id/segments` | Transcript (`?q=`, `?important=1`, `?since=`) |
+| PATCH | `/api/segments/:id` | Sửa câu, đánh dấu quan trọng |
 | POST | `/api/segments/:id/retranslate` | Dịch lại một câu |
-| GET | `/api/conferences/:id/export` | Tải về: `format=md\|txt`, `view=both\|original\|vi` |
-| GET | `/api/conferences/:id/usage` | Chi phí theo từng loại |
-| GET / POST | `/api/conferences/:id/documents` | Danh sách / upload tài liệu (multipart, trường `file`) |
+| GET | `/api/conferences/:id/export` | `format=pdf\|md\|txt`, `view=vi\|original\|both` |
+| GET | `/api/conferences/:id/usage` | Chi phí theo loại |
+| GET / POST | `/api/conferences/:id/documents` | Danh sách / tải tài liệu (multipart, trường `file`) |
 | DELETE | `/api/documents/:id` | Xóa tài liệu |
-| GET / POST | `/api/conferences/:id/questions` | Danh sách câu hỏi / hỏi thủ công (`segmentId` hoặc `text`) |
-| POST | `/api/questions/:id/answer` | Soạn (lại) câu trả lời |
-| POST | `/api/conferences/:id/ws-ticket` | Lấy vé WebSocket một lần |
+| GET / POST | `/api/conferences/:id/questions` | Danh sách câu hỏi / tự gõ câu hỏi |
+| POST | `/api/questions/:id/answer` | Soạn trả lời: `{ text?, quality? }` (sửa câu hỏi, soạn kỹ hơn) |
+| POST | `/api/questions/:id/dismiss` | Skip / xóa câu hỏi |
+| GET | `/api/tts/status` · `/api/conferences/:id/listen.mp3` | Trạng thái và luồng MP3 đọc bản dịch |
+| POST | `/api/conferences/:id/listen/test` | Đọc câu thử |
+| POST | `/api/conferences/:id/ws-ticket` | Vé WebSocket một lần |
 
-**WebSocket:** `ws://127.0.0.1:4000/ws?ticket=<vé>`
-
-- **Trình duyệt gửi lên:** khung nhị phân là audio PCM16 16 kHz. Tin JSON điều khiển gồm `start` (kèm `audioSource`,
-  `consent: true`), `pause`, `resume`, `stop`, `reclaim`, `ping`.
-- **Server gửi xuống:** `state`, `partial`, `partial.clear`, `segment`, `segment.updated`, `translation.delta`,
-  `translation.done` (kèm `flags`), `translation.error`, `question`, `answer.delta`, `error`, `pong`.
+**WebSocket** `/ws?ticket=<vé>`: trình duyệt gửi audio PCM16 16 kHz (khung nhị phân) và lệnh `start`, `pause`,
+`resume`, `stop`, `reclaim`, `ping`. Server gửi `state`, `partial`, `segment`, `translation.delta`,
+`translation.done`, `question`, `answer.delta`, `error`, `pong`…
 
 ---
 
@@ -477,61 +403,43 @@ cần header `Origin` hợp lệ.
 
 | Migration | Nội dung |
 | --- | --- |
-| `001_init.sql` | users, phiên, workspaces, thành viên, hội nghị, phiên nghe, segments, chi phí, audit log |
-| `002_segments_updated_idx.sql` | Index phục vụ đồng bộ bù khi kết nối lại |
-| `003_knowledge_and_questions.sql` | Tài liệu, đoạn tài liệu (full-text), câu hỏi; cột `flags`, `response_modes` |
+| `001_init.sql` | users, phiên, workspaces, hội nghị, phiên nghe, segments, chi phí, audit log |
+| `002_segments_updated_idx.sql` | Index cho đồng bộ bù khi kết nối lại |
+| `003_knowledge_and_questions.sql` | Tài liệu, đoạn tài liệu (full-text), câu hỏi |
 | `004_invitations.sql` | Lời mời thành viên |
+| `005_question_confirmation.sql` | Trạng thái chờ xác nhận câu hỏi |
+| `006_conference_answer_model.sql` | Model trả lời riêng cho từng hội nghị |
+| `007_question_number.sql` | Số thứ tự "Câu N" (đánh số lại cả câu hỏi cũ theo thời gian) |
 
-Migration tự chạy khi server khởi động. Muốn chạy riêng:
-
-```bash
-npm run migrate -w server
-```
-
-Mọi migration đều chỉ **thêm** bảng hoặc cột, không xóa hay sửa dữ liệu cũ.
-
-**Sao lưu PGlite:** dừng server rồi sao chép cả thư mục `data/pglite`.
+Migration tự chạy khi server khởi động (`npm run migrate -w server` để chạy riêng) và chỉ **thêm** bảng hoặc cột.
+Sao lưu PGlite: dừng server rồi sao chép thư mục `data/pglite`.
 
 ---
 
-## Triển khai production
+## Triển khai lên đám mây
 
-> Phần này **chưa được thử nghiệm**. Đây là danh sách việc cần làm, không phải quy trình đã kiểm chứng.
+Xem chi tiết trong [docs/DEPLOY.md](docs/DEPLOY.md). Tóm tắt:
 
-1. Đặt server sau một reverse proxy **HTTPS** (Caddy, Nginx, Cloudflare Tunnel…) và chuyển tiếp cả WebSocket `/ws`.
-2. Cấu hình `.env`:
-   - `COOKIE_SECURE=true`
-   - `ALLOWED_ORIGINS=https://ten-mien-cua-ban`
-   - `TRUST_PROXY=<địa chỉ proxy>`
-   - `HOST` theo cấu hình mạng của máy chủ
-3. Cấu hình `web/.env.local`:
-   - `NEXT_PUBLIC_WS_URL=wss://ten-mien-cua-ban`
-   - `API_ORIGIN=http://127.0.0.1:4000`
-4. Database: dùng **PostgreSQL 16+** qua `DATABASE_URL`, với một role chỉ có quyền trên database của app, kết nối TLS,
-   và bật backup mã hóa.
-5. Build và chạy:
-   - Giao diện: `npm run build -w web`, rồi `npm run start -w web`.
-   - Server: `npm run start -w server`.
-6. Trước khi mở cho người ngoài: làm xong các mục bảo mật còn tồn đọng (WebSocket, CSP, HSTS) và chạy lại
-   `security-probe.ts`.
+- **Railway:** server + PostgreSQL. Cần `DATABASE_URL`, `ANTHROPIC_API_KEY`, `DEEPGRAM_API_KEY`, `HOST=0.0.0.0`,
+  `COOKIE_SECURE=true`, `TRUST_PROXY=2`, `ALLOWED_ORIGINS=<địa chỉ Vercel>`.
+- **Vercel:** giao diện, Root Directory = `web`. Cần `API_ORIGIN=https://<domain Railway>` và
+  `NEXT_PUBLIC_WS_URL=wss://<domain Railway>`.
+- Merge vào `main` thì Vercel và Railway tự deploy. Nếu Railway không tự chạy: mở dịch vụ trên Railway → **Ctrl+K** →
+  **Deploy latest commit**.
 
-Live room nằm trong một tiến trình server. Nếu chạy nhiều tiến trình, cần thêm Redis pub/sub (chưa làm).
+Live room nằm trong một tiến trình server; muốn chạy nhiều tiến trình cần thêm Redis pub/sub (chưa làm).
 
 ---
 
 ## Hạn chế đã biết
 
-- **Ngôn ngữ phụ thuộc mô hình Deepgram.** Chế độ tự nhận diện (`multi`) của `nova-3` chỉ hỗ trợ một nhóm ngôn ngữ. Với
-  ngôn ngữ khác, chọn ngôn ngữ cụ thể khi tạo hội nghị, hoặc đổi `DEEPGRAM_MODEL`. Hãy kiểm tra bảng ngôn ngữ của Deepgram
-  trước buổi quan trọng.
-- **Độ trễ không được bảo đảm.** Chỉ câu đã chốt mới được dịch, nên độ trễ bằng khoảng ngừng của người nói cộng thời gian
-  Claude dịch. Nó còn phụ thuộc mạng và chất lượng âm thanh, và chưa được đo với API thật.
-- **Nhãn người nói** ("Speaker 1/2…") có thể sai khi nhiều người nói cùng lúc.
-- **Âm thanh tab** chỉ chạy trên Chrome/Edge. Safari, Firefox và điện thoại không hỗ trợ.
-- **Rate limit lưu trong RAM** nên reset mỗi lần khởi động lại server.
-- **Tài liệu:** PDF scan (không có chữ chọn được) và ảnh chưa đọc được. File Word được trích dẫn theo "phần", không theo số trang.
-- **Tạm thời chỉ chạy được trên máy tính:** muốn dùng trên điện thoại phải triển khai HTTPS, vì trình duyệt chỉ cho thu
-  âm trên `localhost` hoặc HTTPS.
+- **iOS:** khi Safari dùng micro, âm thanh ra loa ngoài thay vì tai nghe; khóa màn hình thì micro bị tắt.
+- **Tên riêng dễ bị nghe nhầm** (ví dụ "Gen Re" thành "Genre"): thêm vào glossary của hội nghị.
+- **Độ trễ** phụ thuộc khoảng ngừng của người nói, mạng và chất lượng âm thanh.
+- **Nhãn người nói** có thể sai khi nhiều người nói cùng lúc.
+- **Âm thanh tab** chỉ chạy trên Chrome/Edge máy tính.
+- **Tài liệu:** PDF scan và ảnh chưa đọc được; file Word được trích dẫn theo "phần", không theo số trang.
+- **Rate limit lưu trong RAM** nên reset khi khởi động lại server.
 
 ---
 
@@ -539,22 +447,15 @@ Live room nằm trong một tiến trình server. Nếu chạy nhiều tiến tr
 
 | Hiện tượng | Cách xử lý |
 | --- | --- |
-| "Chưa cấu hình DEEPGRAM_API_KEY / ANTHROPIC_API_KEY" | Điền key vào `.env` ở thư mục gốc rồi khởi động lại `npm run dev:server` |
-| "Trình duyệt bị từ chối quyền thu âm" | Bấm biểu tượng ổ khóa trên thanh địa chỉ → cho phép Microphone. Phải mở qua `localhost` hoặc HTTPS |
-| "Thiết bị thu âm đang bị ứng dụng khác chiếm dụng" | Tắt Zoom, Teams hoặc app ghi âm khác |
-| "Không kết nối được Deepgram … HTTP 400" | Tổ hợp mô hình và ngôn ngữ không được hỗ trợ: chọn ngôn ngữ cụ thể hoặc đổi `DEEPGRAM_MODEL` |
-| "Chỉ đăng ký được bằng link mời" | Đúng thiết kế. Xin link từ Owner hoặc Admin, hoặc đặt `ALLOW_SIGNUP=true` trong mạng kín |
-| "Origin không được phép" (403) | Mở app đúng địa chỉ có trong `ALLOWED_ORIGINS` (mặc định `http://localhost:3000`) |
-| "Đã dùng hết trần chi phí AI" | Tăng `AI_CONFERENCE_CAP_USD` hoặc `AI_WORKSPACE_DAILY_CAP_USD`, rồi khởi động lại server |
-| Máy khác trong mạng không mở được app | Đúng thiết kế: dev server chỉ lắng nghe `127.0.0.1`. Dùng cho nhóm thì cần triển khai HTTPS |
-| Tải file "bị từ chối: nghi là bom giải nén" | File có cấu trúc nén bất thường. Lưu lại file bằng Office (Save As) rồi thử lại |
-
----
-
-## Lộ trình
-
-1. **Giao diện Smart Response:** cột gợi ý trả lời, upload tài liệu, chọn kiểu trả lời, hiển thị cờ cảnh báo trên bản dịch.
-2. **Dùng tại hội trường:** giọng đọc bản dịch, chặn im lặng (VAD), thanh điều khiển dưới đáy cho điện thoại, khóa màn hình, nút "Nghe ngay".
-3. **Bảo mật đợt 3–4:** WebSocket thu hồi quyền và giới hạn kết nối, CSP/HSTS, scrypt mạnh hơn, xóa tài khoản và xuất dữ liệu.
-4. **Sau hội nghị:** báo cáo tổng hợp có trích dẫn về từng đoạn transcript, xuất DOCX/PDF.
-5. **Production:** chạy thử với API thật bằng `bench:live`, triển khai HTTPS, chuyển sang PostgreSQL.
+| "Chưa cấu hình DEEPGRAM_API_KEY / ANTHROPIC_API_KEY" | Điền key vào `.env` (hoặc Variables trên Railway) rồi khởi động lại server |
+| "Trình duyệt bị từ chối quyền thu âm" | Bấm ổ khóa trên thanh địa chỉ → cho phép Microphone. Trang phải là `localhost` hoặc HTTPS |
+| Link mở trong Zalo / Messenger không thu âm được | Mở bằng Safari hoặc Chrome |
+| Không nghe tiếng đọc trên iPhone khi đang thu âm | Hạn chế của iOS: để thiết bị khác thu âm, iPhone chỉ nghe |
+| Không có tiếng đọc nào | Thiết bị không có giọng nữ tiếng Việt. Trên Windows: Settings → Time & Language → Speech → thêm Vietnamese |
+| Export PDF báo `expected one of "md"\|"txt"` | Server trên Railway chạy bản cũ: **Deploy latest commit** |
+| Không có popup câu hỏi | Câu hỏi có thể dành cho đội khác, hoặc nghe không rõ (xem thẻ xác nhận ở cột Trợ lý) |
+| Popup không kêu "ting" | Bấm vào trang ít nhất một lần (trình duyệt chặn âm thanh trước khi người dùng tương tác) và kiểm tra âm lượng |
+| "Origin không được phép" (403) | Mở app đúng địa chỉ có trong `ALLOWED_ORIGINS` |
+| "Đã dùng hết trần chi phí AI" | Tăng `AI_CONFERENCE_CAP_USD` / `AI_WORKSPACE_DAILY_CAP_USD` rồi khởi động lại server |
+| Tải tài liệu lỗi trên bản đám mây | File phải dưới 4,5 MB (giới hạn của Vercel) |
+| "Chỉ đăng ký được bằng link mời" | Đúng thiết kế: xin link từ Owner hoặc Admin |
