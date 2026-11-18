@@ -68,7 +68,6 @@ export default function LiveConferencePage() {
   const [now, setNow] = useState(Date.now());
   const [startOpen, setStartOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
   const [fontSize, setFontSize] = usePersistentNumber('cc.fontSize', 20);
   const [bigMode, setBigMode] = useState(false);
   const [tab, setTab] = useState<Tab>('vi');
@@ -412,23 +411,18 @@ export default function LiveConferencePage() {
             {isHost && status === 'live' && <Button onClick={pause}>Pause</Button>}
             {isHost && status === 'paused' && <Button variant="primary" onClick={resume}>Resume</Button>}
             {canManage && (status === 'live' || status === 'paused') && <Button variant="danger" onClick={stop}>Stop Session</Button>}
-            <div className="relative">
-              <Button onClick={() => setExportOpen((o) => !o)} disabled={segments.length === 0}>Export</Button>
-              {exportOpen && (
-                <div className="absolute right-0 z-30 mt-2 w-60 rounded-xl border border-line-strong bg-panel p-1.5 shadow-xl" onMouseLeave={() => setExportOpen(false)}>
-                  {[
-                    ['md', 'both', 'Markdown – gốc + tiếng Việt'],
-                    ['md', 'vi', 'Markdown – chỉ tiếng Việt'],
-                    ['txt', 'both', 'Văn bản – gốc + tiếng Việt'],
-                    ['txt', 'original', 'Văn bản – chỉ bản gốc'],
-                  ].map(([format, view, label]) => (
-                    <a key={label} href={`/api/conferences/${id}/export?format=${format}&view=${view}`} onClick={() => setExportOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-muted hover:bg-panel-2 hover:text-fg">
-                      {label}
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* One click: the Vietnamese transcript as PDF (Markdown/TXT stay available through the export API). */}
+            {segments.length === 0 ? (
+              <Button disabled>Export PDF</Button>
+            ) : (
+              <a
+                href={`/api/conferences/${id}/export?format=pdf&view=vi`}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-line-strong px-3.5 py-2 text-sm font-medium text-fg transition-colors hover:border-electric/60 hover:bg-panel-2"
+                title="Tải bản dịch tiếng Việt dạng PDF"
+              >
+                Export PDF
+              </a>
+            )}
             <Button onClick={copyTranslation} disabled={segments.length === 0}>Copy Translation</Button>
             {canManage && (
               <Button variant="subtle" onClick={() => setSettingsOpen(true)} aria-label="Thông tin hội nghị">

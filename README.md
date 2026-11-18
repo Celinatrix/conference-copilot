@@ -43,7 +43,7 @@ dịch sang **tiếng Việt** sau khoảng 1–2 giây, lưu toàn bộ transcr
 | Ghép câu trước khi dịch, dịch song song 3 câu | ✅ Hoạt động (test) | Tránh câu dịch bị cắt vụn |
 | Transcript tự lưu, sửa, dịch lại, đánh dấu ★, tìm kiếm | ✅ Hoạt động | |
 | Cờ cảnh báo đoạn đáng ngờ (nghe không rõ, số liệu lệch, thuật ngữ sai) | ✅ Backend, ⚠️ chưa hiển thị trên giao diện | |
-| Xuất Markdown / TXT | ✅ Hoạt động | PDF / DOCX chưa có |
+| Xuất PDF / Markdown / TXT | ✅ Hoạt động | PDF có tiếng Việt đầy đủ dấu (nhúng font Be Vietnam Pro); DOCX chưa có |
 | Nhiều người cùng xem một phiên | ✅ Hoạt động | Đo được dưới 8 ms để đẩy tới 20 người (phần server) |
 | Tự kết nối lại khi rớt mạng, giữ 2 phút âm thanh | ✅ Có code, ⚠️ chưa thử rớt mạng thật | |
 | Chế độ chữ lớn, toàn màn hình, giữ màn hình sáng | ✅ Hoạt động | |
