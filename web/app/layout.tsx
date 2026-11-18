@@ -9,6 +9,13 @@ export const metadata: Metadata = {
   title: 'Conference AI Copilot',
   description: 'Dịch hội nghị đa ngôn ngữ sang tiếng Việt theo thời gian thực',
   appleWebApp: { capable: true, title: 'Copilot', statusBarStyle: 'black-translucent' },
+  icons: {
+    icon: [
+      { url: '/favicon.png', sizes: '48x48', type: 'image/png' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+  },
 };
 
 export const viewport: Viewport = { themeColor: '#05080f', width: 'device-width', initialScale: 1 };
