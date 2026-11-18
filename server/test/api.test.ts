@@ -60,12 +60,20 @@ class FakeDetector extends QuestionDetector {
     return true;
   }
   override async detect(input: { current: string; currentVi: string | null; previous: string[] }) {
+    // "[comment]" stands in for a remark on the presentation; "[mixed] remark | question" for a remark followed by a
+    // question to the team.
+    const comment = input.current.includes('[comment]');
+    const mixed = input.current.startsWith('[mixed]');
+    const [remark, asked] = mixed ? input.current.slice(7).split('|').map((s) => s.trim()) : ['', input.current];
     return {
       detection: {
-        is_question: true,
-        worth_answering: true,
-        question: input.current,
-        question_vi: `VI: ${input.current}`,
+        kind: comment ? ('comment' as const) : mixed ? ('comment_with_question' as const) : ('question' as const),
+        comment: comment ? input.current : remark,
+        comment_vi: comment ? `VI: ${input.current}` : mixed ? `VI: ${remark}` : '',
+        is_question: !comment,
+        worth_answering: !comment,
+        question: comment ? '' : asked,
+        question_vi: comment ? '' : `VI: ${asked}`,
         keywords: ['IBNR'],
         // "[garbled]" in the transcript stands in for a question the model judges unclear.
         is_clear: !input.current.includes('[garbled]'),
@@ -462,6 +470,27 @@ describe('conferences and live pipeline', () => {
       const gluedDropped = nextEvent(ws, 'question', (e) => e.question.id === gluedQ.id && e.question.status === 'dismissed');
       ask('And what is the cost of the gift hour per family?', 19);
       await gluedDropped;
+
+      // A judge's remark is listed as "Nhận xét 1" with its own numbering: no popup state, never answered.
+      const remark = nextEvent(ws, 'question', (e) => e.question.kind === 'comment');
+      ask('I think you should add a sensitivity test on inflation [comment].', 22);
+      const c1 = (await remark).question;
+      expect(c1).toMatchObject({ kind: 'comment', status: 'noted', seq: 1, answer: null });
+      expect(c1.text_vi).toContain('VI:');
+      expect((await app.inject({ method: 'POST', url: `/api/questions/${c1.id}/answer`, headers: { cookie } })).statusCode).toBe(400);
+
+      // Remark + question in one breath: split into "Nhận xét 2" and the next "Câu N", which waits for a decision.
+      const lastQuestionSeq = Math.max(
+        ...(await app.inject({ url: `/api/conferences/${id}/questions`, headers: { cookie } }))
+          .json()
+          .questions.filter((q: { kind: string }) => q.kind === 'question')
+          .map((q: { seq: number }) => q.seq),
+      );
+      const splitComment = nextEvent(ws, 'question', (e) => e.question.kind === 'comment' && e.question.seq === 2);
+      const splitQuestion = nextEvent(ws, 'question', (e) => e.question.kind === 'question' && e.question.text_original === 'How do you handle lapses?');
+      ask('[mixed] Great work on the pricing model, really clear. | How do you handle lapses?', 25);
+      expect((await splitComment).question.text_original).toBe('Great work on the pricing model, really clear.');
+      expect((await splitQuestion).question).toMatchObject({ status: 'awaiting_click', seq: lastQuestionSeq + 1 });
 
       ws.send(JSON.stringify({ type: 'stop' }));
       await nextEvent(ws, 'state', (e) => e.status === 'idle');

@@ -86,10 +86,11 @@ export function questionRoutes(app: FastifyInstance, ctx: AppContext) {
     const { id } = req.params as { id: string };
     if (!/^[0-9a-f-]{36}$/i.test(id)) return notFound(reply);
     const body = AnswerRequest.parse(req.body ?? undefined);
-    const [q] = await db.query<{ conference_id: string; status: string }>('SELECT conference_id, status FROM questions WHERE id = $1', [id]);
+    const [q] = await db.query<{ conference_id: string; status: string; kind: string }>('SELECT conference_id, status, kind FROM questions WHERE id = $1', [id]);
     if (!q) return notFound(reply);
     const access = await getConferenceAccess(db, q.conference_id, req.user!.id);
     if (!access) return notFound(reply);
+    if (q.kind === 'comment') return reply.code(400).send({ error: 'not_a_question', message: 'Đây là nhận xét, không phải câu hỏi.' });
     if (q.status === 'answering') return reply.code(409).send({ error: 'busy', message: 'Đang soạn câu trả lời.' });
     if (await refuse(reply, req.user!.id, access.conference.workspace_id, q.conference_id)) return reply;
     if (body?.text) await questions.correctText(id, body.text);

@@ -106,9 +106,11 @@ export interface Question {
   conference_id: string;
   segment_id: string | null;
   source: 'auto' | 'manual';
+  /** 'comment' = a judge's remark on the presentation ("Nhận xét"): listed with its own numbers, never answered. */
+  kind?: 'question' | 'comment';
   text_original: string;
   text_vi: string | null;
-  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click' | 'awaiting_confirm' | 'dismissed';
+  status: 'detected' | 'answering' | 'answered' | 'error' | 'awaiting_click' | 'awaiting_confirm' | 'dismissed' | 'noted';
   error: string | null;
   unclear_reason: string | null;
   /** "Câu N" in the conference, in the order questions were asked (kept when others are removed). */
@@ -126,19 +128,27 @@ export const ANSWER_MODELS: { id: string; name: string; note: string; cost: stri
 ];
 export const DEFAULT_ANSWER_MODEL = 'claude-haiku-5-5';
 
-/** "Câu 3" label for a question (empty for rows created before numbering existed and not yet backfilled). */
-export function questionLabel(q: Pick<Question, 'seq'>): string {
-  return q.seq ? `Câu ${q.seq}` : '';
+export const isComment = (q: Pick<Question, 'kind'>) => q.kind === 'comment';
+
+/** "Câu 3" for a question, "Nhận xét 2" for a judge's remark (empty when the number is unknown). */
+export function questionLabel(q: Pick<Question, 'seq' | 'kind'>): string {
+  if (!q.seq) return '';
+  return isComment(q) ? `Nhận xét ${q.seq}` : `Câu ${q.seq}`;
 }
 
 /**
- * Fills in "Câu N" for questions the server sent without a number (a server not yet migrated): numbered by the
- * order they were asked, counting removed ones too so the numbers do not shift. Server numbers win when present.
+ * Fills in numbers the server did not send (a server not yet migrated): questions and remarks are each numbered by
+ * the order they were heard, counting removed ones too so the numbers do not shift. Server numbers win when present.
  */
 export function numberQuestions(list: Question[]): Question[] {
   if (list.every((q) => q.seq)) return list;
-  const order = [...list].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
-  const fallback = new Map(order.map((q, i) => [q.id, i + 1]));
+  const fallback = new Map<string, number>();
+  for (const comment of [false, true]) {
+    const order = list
+      .filter((q) => isComment(q) === comment)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    order.forEach((q, i) => fallback.set(q.id, i + 1));
+  }
   return list.map((q) => (q.seq ? q : { ...q, seq: fallback.get(q.id) ?? null }));
 }
 
