@@ -3,10 +3,9 @@
 Trợ lý phiên dịch hội nghị theo thời gian thực: nghe diễn giả nói bằng bất kỳ ngôn ngữ nào, chuyển thành văn bản,
 dịch sang **tiếng Việt** sau khoảng 1–2 giây, lưu toàn bộ transcript, và cho cả nhóm 10–20 người cùng theo dõi một phiên.
 
-> **Trạng thái:** bản phát triển (chưa triển khai production). Lõi dịch realtime, quản lý hội nghị, lời mời thành viên
-> và các lớp bảo mật đã có, kèm 71 test tự động. Ứng dụng **chưa được chạy với API key thật** của Deepgram và Anthropic,
-> nên độ trễ và độ chính xác thực tế chưa được đo. Xem [Trạng thái tính năng](#trạng-thái-tính-năng) để biết chính xác
-> phần nào đã chạy, phần nào mới có backend.
+> **Trạng thái:** đã chạy thật với Deepgram và Claude, và đã triển khai lên đám mây (giao diện trên Vercel, server +
+> PostgreSQL trên Railway; xem [docs/DEPLOY.md](docs/DEPLOY.md)). Có 80 test tự động, chạy lại trên GitHub Actions mỗi
+> lần đẩy code. Xem [Trạng thái tính năng](#trạng-thái-tính-năng) để biết chính xác phần nào đã kiểm chứng.
 
 ---
 
@@ -403,6 +402,10 @@ Chạy 38 bài tấn công thử trên một bản app dựng trong bộ nhớ, 
 
 ```
 conference-copilot/
+├─ .github/                     CI (typecheck + test + build) và Dependabot (cập nhật thư viện)
+├─ docs/DEPLOY.md               hướng dẫn triển khai Vercel + Railway
+├─ scripts/https-proxy.mjs      chế độ HTTPS trong mạng LAN (iPhone thu âm)
+├─ railway.json                 cấu hình chạy server trên Railway
 ├─ server/                      API + WebSocket (Fastify, TypeScript)
 │  ├─ migrations/               SQL migration, tự chạy khi server khởi động
 │  ├─ scripts/                  bench-fanout, bench-live, security-probe
@@ -419,6 +422,7 @@ conference-copilot/
 │  │  │  └─ room.ts             điều phối phiên, lưu, phát sự kiện, hàng chờ dịch
 │  │  ├─ kb/                    Knowledge Base: đọc tài liệu, kiểm tra an toàn, worker, tìm kiếm
 │  │  ├─ ai/                    phát hiện câu hỏi, soạn trả lời có trích dẫn, cờ cảnh báo, trần chi phí
+│  │  ├─ tts/                   luồng giọng đọc MP3 (giọng Windows, chỉ chạy trên máy Windows)
 │  │  └─ routes/                REST: auth, conferences, documents, questions, workspace
 │  └─ test/                     vitest
 └─ web/                         giao diện (Next.js, React, Tailwind)

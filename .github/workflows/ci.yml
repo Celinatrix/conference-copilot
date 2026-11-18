@@ -1,0 +1,40 @@
+# Runs on every push to main and every pull request: type checks, the server test suite and a production
+# build of the web app. A red check on a pull request means: do not merge yet.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Lowest Node version the project supports (package.json "engines").
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check (server + web)
+        run: npm run typecheck
+
+      - name: Server tests
+        run: npm test
+
+      - name: Web production build
+        run: npm run build -w web
+        env:
+          # Placeholders: the build only needs the values to exist.
+          API_ORIGIN: https://api.example.com
+          NEXT_PUBLIC_WS_URL: wss://api.example.com

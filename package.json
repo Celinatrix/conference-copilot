@@ -14,7 +14,9 @@
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "dev:server:lan": "npm run dev:lan -w server",
     "dev:web:lan": "npm run dev:lan -w web",
-    "dev:https": "node scripts/https-proxy.mjs"
+    "dev:https": "node scripts/https-proxy.mjs",
+    "build:web": "npm run build -w web",
+    "check": "npm run typecheck && npm test"
   },
   "overrides": {
     "exceljs": {

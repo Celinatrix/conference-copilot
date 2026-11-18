@@ -1,0 +1,18 @@
+# Opens pull requests to keep dependencies current. Minor and patch updates arrive grouped in one weekly PR;
+# major versions (which can break things) come one by one. CI runs on each PR before you merge.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
