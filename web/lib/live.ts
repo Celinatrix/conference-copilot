@@ -7,6 +7,8 @@ export type LiveEvent =
       status: 'idle' | 'live' | 'paused' | 'ending';
       sessionId: string | null;
       startedAt: string | null;
+      /** Server clock at send time; absent from servers deployed before it was added. */
+      serverTime?: string;
       hostConnected: boolean;
       hostUserId: string | null;
       youAreHost: boolean;

@@ -41,6 +41,8 @@ export type ServerEvent =
       status: RoomStatus;
       sessionId: string | null;
       startedAt: string | null;
+      /** Server clock when this event was sent, so clients can correct their own clock skew for the session timer. */
+      serverTime: string;
       hostConnected: boolean;
       hostUserId: string | null;
       youAreHost: boolean;

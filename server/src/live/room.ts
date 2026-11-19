@@ -397,6 +397,7 @@ class LiveRoom {
       status: this.status,
       sessionId: this.session?.id ?? null,
       startedAt: this.session?.startedAt.toISOString() ?? null,
+      serverTime: new Date().toISOString(),
       hostConnected: this.host !== null,
       hostUserId: this.hostUserId,
       youAreHost: client === this.host,

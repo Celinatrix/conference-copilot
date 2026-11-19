@@ -67,6 +67,7 @@ export default function LiveConferencePage() {
   const [level, setLevel] = useState(0);
   const [queued, setQueued] = useState(0);
   const [now, setNow] = useState(Date.now());
+  const clockOffsetRef = useRef(0);
   const [startOpen, setStartOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fontSize, setFontSize] = usePersistentNumber('cc.fontSize', 20);
@@ -138,6 +139,9 @@ export default function LiveConferencePage() {
     (e: LiveEvent) => {
       switch (e.type) {
         case 'state': {
+          // startedAt comes from the server clock; measure how far this device's clock is off so the timer
+          // does not sit at 00:00:00 (or run short) when the device clock lags.
+          if (e.serverTime) clockOffsetRef.current = new Date(e.serverTime).getTime() - Date.now();
           setRoom(e);
           const live = e.status === 'live';
           if (captureRef.current) {
@@ -373,7 +377,7 @@ export default function LiveConferencePage() {
   if (!conference) return <div className="grid h-[60dvh] place-items-center text-muted"><Spinner className="size-5" /></div>;
 
   const someoneElseHosting = room?.hostConnected && !room.youAreHost;
-  const startedMs = room?.startedAt ? now - new Date(room.startedAt).getTime() : 0;
+  const startedMs = room?.startedAt ? now + clockOffsetRef.current - new Date(room.startedAt).getTime() : 0;
 
   return (
     <div className="flex h-dvh flex-col">
